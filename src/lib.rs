@@ -5,11 +5,13 @@
 //! line to `plugins/data/perfmon/metrics.csv` on a fixed interval. Everything is reachable with
 //! the `/perf` command (aliases `/tps`, `/lag`).
 
+pub mod chat;
 pub mod config;
 pub mod stats;
 
 #[cfg(target_arch = "wasm32")]
 mod plugin {
+    use crate::chat::{self, Part, button, text};
     use crate::config::Config;
     use crate::stats::{Stats, human_bytes, mspt_colour, tps_colour};
     use pumpkin_plugin_api::command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs};
@@ -44,6 +46,29 @@ mod plugin {
     }
     fn say(sender: &CommandSender, text: &str) {
         sender.send_message(TextComponent::from_legacy_string(text));
+    }
+    /// Sends a line with click and hover actions; falls back to plain text if the server rejects it.
+    fn say_parts(sender: &CommandSender, parts: &[Part]) {
+        match TextComponent::from_json(&chat::line(parts)) {
+            Ok(c) => sender.send_message(c),
+            Err(_) => say(sender, &chat::plain(parts)),
+        }
+    }
+    /// The clickable bar of subcommands shown under most outputs.
+    fn nav(sender: &CommandSender) {
+        say_parts(sender, &[
+            button("Refresh", "/perf", "TPS, tick times, players and memory"),
+            text(" ", "gray"),
+            button("Entities", "/perf entities", "Entity and player counts per dimension"),
+            text(" ", "gray"),
+            button("Memory", "/perf heap", "Machine memory and CPU threads"),
+            text(" ", "gray"),
+            button("Spikes", "/perf spikes", "The most recent lag spikes"),
+            text(" ", "gray"),
+            button("Report", "/perf report", "Write everything to a report file"),
+            text(" ", "gray"),
+            text("[Reset]", "red").suggest("/perf reset").hover("Clear the tick history and spike list\nClick to put /perf reset in the chat box"),
+        ]);
     }
     /// Linear memory of this plugin's own sandbox (its "heap").
     fn plugin_heap_bytes() -> u64 {
@@ -132,6 +157,17 @@ mod plugin {
         ]
     }
 
+    fn strip_codes(l: &str) -> String {
+        let mut o = String::new();
+        let mut skip = false;
+        for c in l.chars() {
+            if skip { skip = false; continue; }
+            if c == '§' { skip = true; continue; }
+            o.push(c);
+        }
+        o
+    }
+
     fn write_report(server: &Server) -> Result<String, String> {
         let folder = FOLDER.lock().unwrap().clone();
         let t = now();
@@ -188,20 +224,47 @@ mod plugin {
         fn handle(&self, sender: CommandSender, server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
             match self.0 {
                 Action::Summary => {
-                    for l in summary_lines(&server) { say(&sender, &l); }
+                    let (s5, m1, m5, m15) = with_stats(|s| (s.summary(100), s.summary(1200), s.summary(6000), s.summary(18000)));
+                    let lines = summary_lines(&server);
+                    say_parts(&sender, &[text("== Server performance ==", "gold").bold().run("/perf").hover("Click to refresh")]);
+                    let tps = |label: &str, v: f64, span: &str| text(format!("{v:.2}"), chat::tps_color(v)).hover(format!("{label}: average TPS over the last {span}\n20.00 is full speed"));
+                    say_parts(&sender, &[
+                        text("TPS (5s, 1m, 5m, 15m): ", "gray"),
+                        tps("5 seconds", s5.tps, "5 seconds"), text(" / ", "gray"),
+                        tps("1 minute", m1.tps, "minute"), text(" / ", "gray"),
+                        tps("5 minutes", m5.tps, "5 minutes"), text(" / ", "gray"),
+                        tps("15 minutes", m15.tps, "15 minutes"),
+                    ]);
+                    say_parts(&sender, &[
+                        text("MSPT 1m: ", "gray").hover("Milliseconds per tick over the last minute.\nUnder 50 ms keeps 20 TPS."),
+                        text("mean ", "gray"), text(format!("{:.1}", m1.mean_ms), chat::mspt_color(m1.mean_ms)).hover("Average tick time"),
+                        text(" p50 ", "gray"), text(format!("{:.1}", m1.p50_ms), "white").hover("Half of all ticks were faster than this"),
+                        text(" p95 ", "gray"), text(format!("{:.1}", m1.p95_ms), chat::mspt_color(m1.p95_ms)).hover("95% of ticks were faster than this"),
+                        text(" p99 ", "gray"), text(format!("{:.1}", m1.p99_ms), "white").hover("99% of ticks were faster than this"),
+                        text(" max ", "gray"), text(format!("{:.1}", m1.max_ms), chat::mspt_color(m1.max_ms)).hover("The slowest tick in the last minute"),
+                        text(" ms", "gray"),
+                    ]);
+                    say_parts(&sender, &[
+                        text(format!("Ticks over 50 ms in the last minute: {} of {}", m1.over_budget, m1.ticks), "gray"),
+                    ]);
+                    // Spike count links to the spike list.
+                    if let Some(l) = lines.get(4) { say_parts(&sender, &[text(strip_codes(l), "gray").run("/perf spikes").hover("Click to list recent lag spikes")]); }
+                    if let Some(l) = lines.get(5) { say(&sender, l); }
                     for l in memory_lines(&server) { say(&sender, &l); }
-                    say(&sender, "§8/perf entities | heap | spikes | report | reset");
+                    nav(&sender);
                 }
                 Action::Entities => {
                     let ec = count_entities(&server);
                     say(&sender, &format!("§6§l== Entities: {} ==", ec.total));
                     for (w, n, p) in &ec.per_world { say(&sender, &format!("§7{w}: §f{n} §7entities, §f{p} §7players")); }
                     for (ty, n) in ec.by_type.iter().take(10) { say(&sender, &format!("§7  {ty}: §f{n}")); }
+                    nav(&sender);
                 }
                 Action::Heap => {
                     say(&sender, "§6§l== Memory ==");
                     for l in memory_lines(&server) { say(&sender, &l); }
                     say(&sender, "§8System memory is the whole machine's; Pumpkin does not expose its own heap to plugins.");
+                    nav(&sender);
                 }
                 Action::Spikes => {
                     let list = with_stats(|s| s.recent_spikes(10));
@@ -209,20 +272,32 @@ mod plugin {
                     if list.is_empty() { say(&sender, "§aNone recorded."); }
                     let t = now();
                     for s in list {
-                        say(&sender, &format!("§7{}s ago: tick §f{} §7took {}{:.1} ms", t.saturating_sub(s.unix_secs), s.tick, mspt_colour(s.duration_us as f64 / 1000.0), s.duration_us as f64 / 1000.0));
+                        let ms = s.duration_us as f64 / 1000.0;
+                        say_parts(&sender, &[
+                            text(format!("{}s ago: tick ", t.saturating_sub(s.unix_secs)), "gray"),
+                            text(s.tick.to_string(), "white").copy(s.tick.to_string()).hover(format!("Tick {}\nUnix time {}\nClick to copy the tick number", s.tick, s.unix_secs)),
+                            text(" took ", "gray"),
+                            text(format!("{ms:.1} ms"), chat::mspt_color(ms)).hover(format!("{:.1}x the 50 ms tick budget", ms / 50.0)),
+                        ]);
                     }
+                    nav(&sender);
                 }
                 Action::Report => match write_report(&server) {
-                    Ok(path) => say(&sender, &format!("§aReport written to {path}")),
+                    Ok(path) => say_parts(&sender, &[
+                        text("Report written to ", "green"),
+                        text(path.clone(), "white").copy(path).hover("Click to copy the path"),
+                    ]),
                     Err(e) => say(&sender, &format!("§cCould not write the report: {e}")),
                 },
                 Action::Reset => {
                     with_stats(Stats::reset);
-                    say(&sender, "§aTick history and spike list cleared.");
+                    say_parts(&sender, &[text("Tick history and spike list cleared. ", "green"), button("Refresh", "/perf", "Show the summary")]);
                 }
                 Action::Help => {
-                    for l in ["§6/perf §7summary: TPS, MSPT percentiles, players, memory", "§6/perf entities §7entity counts per world and by type", "§6/perf heap §7memory", "§6/perf spikes §7recent lag spikes", "§6/perf report §7write a full report file", "§6/perf reset §7clear history"] {
-                        say(&sender, l);
+                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf entities", "entity counts per world and by type"), ("/perf heap", "memory"), ("/perf spikes", "recent lag spikes"), ("/perf report", "write a full report file"), ("/perf reset", "clear history")] {
+                        let c = text(cmd, "gold");
+                        let c = if cmd == "/perf reset" { c.suggest(cmd) } else { c.run(cmd) };
+                        say_parts(&sender, &[c.hover(format!("Click for {cmd}")), text(format!(" {what}"), "gray")]);
                     }
                 }
             }

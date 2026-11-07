@@ -13,6 +13,7 @@
 - 🧠 **Memory**: machine memory, CPU threads, and the plugin's own footprint
 - 📝 **One-command reports**: `/perf report` writes everything, including the last 1,200 tick times, to a text file you can share
 - 📈 **CSV metrics log**: one line a minute in `metrics.csv`, ready to graph in any spreadsheet
+- 🖱️ **Clickable chat**: a button bar under every result, hover explanations on each number, click-to-copy report paths
 - 🎨 Colour coded: green is healthy, yellow is close to the limit, red is lagging
 - 🪶 Lightweight: one small event per tick, no extra threads, about 1 MB of memory
 

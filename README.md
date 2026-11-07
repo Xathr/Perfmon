@@ -30,6 +30,10 @@ Built against Pumpkin commit `d1190dc` (plugin API v0.1).
 | `/perf report` | Writes a full report to `plugins/data/perfmon/report-<unix time>.txt`, including the last 1200 tick times |
 | `/perf reset` | Clears the tick history and spike list |
 
+Output is clickable in game: a button bar under each result runs the other subcommands, numbers
+explain themselves on hover, spike tick numbers and report paths copy on click, and **[Reset]**
+only fills in the chat box so it can't be triggered by accident.
+
 TPS is worked out from tick durations: a tick that takes under 50 ms counts as 50 ms, because the
 server sleeps for the rest. Colours: green is healthy, yellow is close to the limit, red is lagging.
 

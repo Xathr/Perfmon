@@ -1,6 +1,6 @@
 [package]
 name = "perfmon"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0"
 description = "Pumpkin plugin: tick timing, lag spikes, entity counts and memory, with in-game commands and a CSV log"
@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 pumpkin-plugin-api = { git = "https://github.com/Pumpkin-MC/Pumpkin.git", rev = "d1190dc51edc3d4447780017e244f8bc882cb81a" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
+serde_json = "1"
 
 [profile.release]
 opt-level = 3
