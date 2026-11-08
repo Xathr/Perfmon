@@ -35,9 +35,16 @@ mod plugin {
     fn now() -> u64 {
         SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
     }
+    fn tag() -> &'static str {
+        if cfg().console_colors { "\x1b[95m[perfmon]\x1b[0m" } else { "[perfmon]" }
+    }
     fn log(level: pumpkin_plugin_api::logging::LogLevel, msg: &str) {
-        let tag = if cfg().console_colors { "\x1b[95m[perfmon]\x1b[0m" } else { "[perfmon]" };
-        pumpkin_plugin_api::logging::log(level, &format!("{tag} {msg}"));
+        pumpkin_plugin_api::logging::log(level, &format!("{} {msg}", tag()));
+    }
+    /// Puts the [perfmon] tag in front of every line of a reply shown in the console.
+    fn tag_lines(text: &str) -> String {
+        let tag = tag();
+        text.lines().map(|l| format!("{tag} {l}")).collect::<Vec<_>>().join("\n")
     }
     fn cfg() -> Config {
         CONFIG.lock().unwrap().clone().unwrap_or_default()
@@ -50,7 +57,7 @@ mod plugin {
         if sender.is_console() {
             // The console prints chat text uncoloured, so send it ANSI-coloured instead.
             let t = if cfg().console_colors { chat::legacy_to_ansi(text) } else { strip_codes(text) };
-            sender.send_message(TextComponent::text(&t));
+            sender.send_message(TextComponent::text(&tag_lines(&t)));
         } else {
             sender.send_message(TextComponent::from_legacy_string(text));
         }
@@ -59,7 +66,7 @@ mod plugin {
     fn say_parts(sender: &CommandSender, parts: &[Part]) {
         if sender.is_console() {
             let t = if cfg().console_colors { chat::ansi(parts) } else { chat::plain(parts) };
-            sender.send_message(TextComponent::text(&t));
+            sender.send_message(TextComponent::text(&tag_lines(&t)));
             return;
         }
         match TextComponent::from_json(&chat::line(parts)) {
@@ -373,7 +380,7 @@ mod plugin {
                 csv_interval_secs: config.csv_interval_secs,
             };
             for line in crate::banner::lines(&info, config.console_colors) {
-                pumpkin_plugin_api::logging::log(pumpkin_plugin_api::logging::LogLevel::Info, &line);
+                log(pumpkin_plugin_api::logging::LogLevel::Info, &line);
             }
             Ok(())
         }
