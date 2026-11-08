@@ -52,27 +52,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd target/wasm32-wasip2/release && sha256sum perfmon.wasm > perfmon.wasm.sha256 && cd -
-          # What changed since the previous release, from the commit messages (subjects, plus
-          # their "- " bullet lines). Lines mentioning tooling vendors are left out.
+          # Changes since the previous release: one line per commit subject.
           prev=$(git tag --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -1 || true)
-          range="${prev:+$prev..}HEAD"
           {
-            if [ -n "$prev" ]; then echo "## What's changed since $prev"; else echo "## What's in this release"; fi
+            echo "## Changes${prev:+ since $prev}"
             echo
-            git log "$range" --no-merges --format='@@%s%n%b' | awk '
-              function flush() { if (cur != "") print cur; cur = "" }
-              /^@@/ { flush(); print "- " substr($0, 3); next }
-              /^- / { flush(); cur = "  " $0; next }
-              /^  [^ ]/ && cur != "" { sub(/^  /, ""); cur = cur " " $0; next }
-              { flush() }
-              END { flush() }' | grep -viE 'claude|anthropic|co-authored-by|^ *$' || echo "- Maintenance release."
+            git log "${prev:+$prev..}HEAD" --no-merges --format='- %s' | grep -viE 'claude|anthropic' || echo "- Minor fixes"
             echo
           } > changes.md
           {
             cat changes.md
             echo "## Install"
             echo
-            echo "Drop \`perfmon.wasm\` into your Pumpkin server's \`plugins/\` folder and restart. See the README for commands and config."
+            echo "Put \`perfmon.wasm\` in \`plugins/\` and restart. Use \`/perf\` in game or the console."
           } > release-notes.md
           gh release create "$TAG" --target "$GITHUB_SHA" target/wasm32-wasip2/release/perfmon.wasm target/wasm32-wasip2/release/perfmon.wasm.sha256 \
             --title "perfmon $TAG" --notes-file release-notes.md
