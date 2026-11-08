@@ -2,7 +2,7 @@
 
 **perfmon** watches every single server tick and tells you, in game or from the console, exactly how healthy your Pumpkin server is. No guessing from a single TPS number: see tick-time percentiles, catch lag spikes the moment they happen, find which mobs are piling up, and keep a CSV history you can graph.
 
-![perfmon](https://raw.githubusercontent.com/jayclrk358/Perfmon/main/market/screenshot-perf.png)
+![perfmon](https://raw.githubusercontent.com/Xathr/Perfmon/main/market/screenshot-perf.png)
 
 ## Features
 

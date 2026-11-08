@@ -10,7 +10,7 @@ metrics to a CSV file.
 
 ## Install
 
-1. Download `Perfmon.wasm` from the [latest release](https://github.com/jayclrk358/Perfmon/releases/latest),
+1. Download `Perfmon.wasm` from the [latest release](https://github.com/Xathr/Perfmon/releases/latest),
    or install it from the Pumpkin Market.
 2. Put it in your server's `plugins/` folder.
 3. Pre-approve its permissions in `pumpkin.toml` (see [Permissions](#permissions)) and restart.
