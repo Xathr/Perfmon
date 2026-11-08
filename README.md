@@ -15,7 +15,7 @@ metrics to a CSV file.
 2. Put it in your server's `plugins/` folder.
 3. Pre-approve its permissions in `pumpkin.toml` (see [Permissions](#permissions)) and restart.
 
-Built against Pumpkin commit `d1190dc` (plugin API v0.1).
+Built against Pumpkin 0.2.2 (commit `eda6944`, plugin API v0.1).
 
 ## Commands
 

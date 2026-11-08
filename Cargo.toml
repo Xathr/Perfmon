@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Pinned to the same Pumpkin commit as build.sh
-pumpkin-plugin-api = { git = "https://github.com/Pumpkin-MC/Pumpkin.git", rev = "d1190dc51edc3d4447780017e244f8bc882cb81a" }
+pumpkin-plugin-api = { git = "https://github.com/Pumpkin-MC/Pumpkin.git", rev = "eda69440e6369c5f8a05c3f69fc809c40dab93a6" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 serde_json = "1"
