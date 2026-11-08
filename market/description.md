@@ -15,6 +15,7 @@
 - 📈 **CSV metrics log**: one line a minute in `metrics.csv`, ready to graph in any spreadsheet
 - 🖱️ **Clickable chat**: a button bar under every result, hover explanations on each number, click-to-copy report paths
 - 🎨 Colour coded: green is healthy, yellow is close to the limit, red is lagging
+- 🖥️ **Startup banner** with the spike threshold, CSV log and commands, and every console line tagged `[Perfmon]`, including `/perf` output in the console
 - 🪶 Lightweight: one small event per tick, no extra threads, about 1 MB of memory
 
 ## Commands
@@ -63,5 +64,7 @@ allowed_permissions = ["sys.info", "fs.read.data", "fs.write.data"]
 ## Good to know
 
 Pumpkin gives plugins the machine's memory, not the server's own heap. On Linux, `ps -o rss= -C pumpkin` shows the server's own memory.
+
+Built for Pumpkin 0.2.2 (Minecraft 26.3, plugin API v0.1).
 
 Open source under GPL-3.0. Issues and ideas are welcome on GitHub.
