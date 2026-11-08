@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable && rustup target add wasm32-wasip2
@@ -50,6 +52,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd target/wasm32-wasip2/release && sha256sum perfmon.wasm > perfmon.wasm.sha256 && cd -
+          # What changed since the previous release, from the commit messages (subjects, plus
+          # their "- " bullet lines). Lines mentioning tooling vendors are left out.
+          prev=$(git tag --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -1 || true)
+          range="${prev:+$prev..}HEAD"
+          {
+            if [ -n "$prev" ]; then echo "## What's changed since $prev"; else echo "## What's in this release"; fi
+            echo
+            git log "$range" --no-merges --format='@@%s%n%b' | awk '
+              function flush() { if (cur != "") print cur; cur = "" }
+              /^@@/ { flush(); print "- " substr($0, 3); next }
+              /^- / { flush(); cur = "  " $0; next }
+              /^  [^ ]/ && cur != "" { sub(/^  /, ""); cur = cur " " $0; next }
+              { flush() }
+              END { flush() }' | grep -viE 'claude|anthropic|co-authored-by|^ *$' || echo "- Maintenance release."
+            echo
+          } > changes.md
+          {
+            cat changes.md
+            echo "## Install"
+            echo
+            echo "Drop \`perfmon.wasm\` into your Pumpkin server's \`plugins/\` folder and restart. See the README for commands and config."
+          } > release-notes.md
           gh release create "$TAG" --target "$GITHUB_SHA" target/wasm32-wasip2/release/perfmon.wasm target/wasm32-wasip2/release/perfmon.wasm.sha256 \
-            --title "perfmon $TAG" \
-            --notes "Drop \`perfmon.wasm\` into your Pumpkin server's \`plugins/\` folder and restart. See the README for commands and config."
+            --title "perfmon $TAG" --notes-file release-notes.md
