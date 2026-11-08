@@ -2,7 +2,7 @@
 
 <img src="market/logo.png" width="96" align="right" alt="perfmon logo">
 
-`perfmon.wasm` is a [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin) plugin. It times every server
+`Perfmon.wasm` is a [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin) plugin. It times every server
 tick, keeps 15 minutes of history, flags lag spikes, counts entities, reports memory, and logs
 metrics to a CSV file.
 
@@ -10,7 +10,7 @@ metrics to a CSV file.
 
 ## Install
 
-1. Download `perfmon.wasm` from the [latest release](https://github.com/jayclrk358/Perfmon/releases/latest),
+1. Download `Perfmon.wasm` from the [latest release](https://github.com/jayclrk358/Perfmon/releases/latest),
    or install it from the Pumpkin Market.
 2. Put it in your server's `plugins/` folder.
 3. Pre-approve its permissions in `pumpkin.toml` (see [Permissions](#permissions)) and restart.
@@ -87,7 +87,7 @@ allowed_permissions = ["sys.info", "fs.read.data", "fs.write.data"]
 ./build.sh        # Linux/macOS, or .\build.ps1 on Windows
 ```
 
-The file is `target/wasm32-wasip2/release/perfmon.wasm`. Pushing a `v*` tag builds it on GitHub
+The file is `target/wasm32-wasip2/release/Perfmon.wasm`. Pushing a `v*` tag builds it on GitHub
 Actions and attaches it to a release.
 
 ## License

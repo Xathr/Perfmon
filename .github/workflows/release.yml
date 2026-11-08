@@ -37,13 +37,13 @@ jobs:
       - name: Test
         run: cargo test --release
 
-      - name: Build perfmon.wasm
+      - name: Build Perfmon.wasm
         run: ./build.sh
 
       - uses: actions/upload-artifact@v4
         with:
           name: perfmon
-          path: target/wasm32-wasip2/release/perfmon.wasm
+          path: target/wasm32-wasip2/release/Perfmon.wasm
           if-no-files-found: error
 
       - name: Publish the release
@@ -51,7 +51,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd target/wasm32-wasip2/release && sha256sum perfmon.wasm > perfmon.wasm.sha256 && cd -
+          cd target/wasm32-wasip2/release && sha256sum Perfmon.wasm > Perfmon.wasm.sha256 && cd -
           # Changes since the previous release: one line per commit subject.
           prev=$(git tag --merged HEAD --sort=-v:refname | grep -vxF "$TAG" | head -1 || true)
           {
@@ -65,7 +65,7 @@ jobs:
             cat changes.md
             echo "## Install"
             echo
-            echo "Put \`perfmon.wasm\` in \`plugins/\` and restart. Use \`/perf\` in game or the console."
+            echo "Put \`Perfmon.wasm\` in \`plugins/\` and restart. Use \`/perf\` in game or the console."
           } > release-notes.md
-          gh release create "$TAG" --target "$GITHUB_SHA" target/wasm32-wasip2/release/perfmon.wasm target/wasm32-wasip2/release/perfmon.wasm.sha256 \
+          gh release create "$TAG" --target "$GITHUB_SHA" target/wasm32-wasip2/release/Perfmon.wasm target/wasm32-wasip2/release/Perfmon.wasm.sha256 \
             --title "perfmon $TAG" --notes-file release-notes.md

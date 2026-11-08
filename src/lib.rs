@@ -5,6 +5,8 @@
 //! line to `plugins/data/perfmon/metrics.csv` on a fixed interval. Everything is reachable with
 //! the `/perf` command (aliases `/tps`, `/lag`).
 
+#![allow(non_snake_case)] // the library is named Perfmon so the plugin file is Perfmon.wasm
+
 pub mod banner;
 pub mod chat;
 pub mod config;
@@ -36,12 +38,12 @@ mod plugin {
         SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
     }
     fn tag() -> &'static str {
-        if cfg().console_colors { "\x1b[95m[perfmon]\x1b[0m" } else { "[perfmon]" }
+        if cfg().console_colors { "\x1b[95m[Perfmon]\x1b[0m" } else { "[Perfmon]" }
     }
     fn log(level: pumpkin_plugin_api::logging::LogLevel, msg: &str) {
         pumpkin_plugin_api::logging::log(level, &format!("{} {msg}", tag()));
     }
-    /// Puts the [perfmon] tag in front of every line of a reply shown in the console.
+    /// Puts the [Perfmon] tag in front of every line of a reply shown in the console.
     fn tag_lines(text: &str) -> String {
         let tag = tag();
         text.lines().map(|l| format!("{tag} {l}")).collect::<Vec<_>>().join("\n")

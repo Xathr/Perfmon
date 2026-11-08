@@ -1,12 +1,14 @@
 [package]
 name = "perfmon"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 license = "GPL-3.0"
 description = "Pumpkin plugin: tick timing, lag spikes, entity counts and memory, with in-game commands and a CSV log"
 publish = false
 
 [lib]
+# Capitalised so the build produces Perfmon.wasm.
+name = "Perfmon"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
