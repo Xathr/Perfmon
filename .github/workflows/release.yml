@@ -5,9 +5,18 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release version to create, e.g. v0.2.1 (the workflow creates the tag). Leave empty for a test build."
+        required: false
+        default: ""
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/') || inputs.tag != '' }}
 
 jobs:
   build:
@@ -36,11 +45,11 @@ jobs:
           if-no-files-found: error
 
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.RELEASE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd target/wasm32-wasip2/release && sha256sum perfmon.wasm > perfmon.wasm.sha256 && cd -
-          gh release create "$GITHUB_REF_NAME" target/wasm32-wasip2/release/perfmon.wasm target/wasm32-wasip2/release/perfmon.wasm.sha256 \
-            --title "perfmon $GITHUB_REF_NAME" \
+          gh release create "$TAG" --target "$GITHUB_SHA" target/wasm32-wasip2/release/perfmon.wasm target/wasm32-wasip2/release/perfmon.wasm.sha256 \
+            --title "perfmon $TAG" \
             --notes "Drop \`perfmon.wasm\` into your Pumpkin server's \`plugins/\` folder and restart. See the README for commands and config."
