@@ -57,7 +57,8 @@ jobs:
           {
             echo "## Changes${prev:+ since $prev}"
             echo
-            git log "${prev:+$prev..}HEAD" --no-merges --format='- %s' | grep -viE 'claude|anthropic' || echo "- Minor fixes"
+            changes=$(git log "${prev:+$prev..}HEAD" --no-merges --format='- %s')
+            echo "${changes:-- Minor fixes}"
             echo
           } > changes.md
           {

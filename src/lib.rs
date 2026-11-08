@@ -5,6 +5,7 @@
 //! line to `plugins/data/perfmon/metrics.csv` on a fixed interval. Everything is reachable with
 //! the `/perf` command (aliases `/tps`, `/lag`).
 
+pub mod banner;
 pub mod chat;
 pub mod config;
 pub mod stats;
@@ -365,7 +366,15 @@ mod plugin {
                 let period = config.csv_interval_secs * 20;
                 context.schedule_repeating_task(period, period, |server| append_csv(&server));
             }
-            log(pumpkin_plugin_api::logging::LogLevel::Info, &format!("watching tick times (spike threshold {} ms); use /perf", config.spike_threshold_ms));
+            let info = crate::banner::Info {
+                version: env!("CARGO_PKG_VERSION"),
+                spike_threshold_ms: config.spike_threshold_ms,
+                warn_on_spike: config.warn_on_spike,
+                csv_interval_secs: config.csv_interval_secs,
+            };
+            for line in crate::banner::lines(&info, config.console_colors) {
+                pumpkin_plugin_api::logging::log(pumpkin_plugin_api::logging::LogLevel::Info, &line);
+            }
             Ok(())
         }
     }
