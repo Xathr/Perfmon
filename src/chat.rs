@@ -116,3 +116,72 @@ mod tests {
         assert_eq!(plain(&parts), "quote \" and \\ slash");
     }
 }
+
+/// ANSI code for a chat colour name.
+fn ansi_code(color: &str) -> &'static str {
+    match color {
+        "black" => "30",
+        "dark_blue" => "34",
+        "dark_green" => "32",
+        "dark_aqua" => "36",
+        "dark_red" => "31",
+        "dark_purple" => "35",
+        "gold" => "33",
+        "gray" => "37",
+        "dark_gray" => "90",
+        "blue" => "94",
+        "green" => "92",
+        "aqua" => "96",
+        "red" => "91",
+        "light_purple" => "95",
+        "yellow" => "93",
+        _ => "97",
+    }
+}
+
+/// The line as ANSI-coloured text for the server console.
+pub fn ansi(parts: &[Part]) -> String {
+    let mut out = String::new();
+    for p in parts {
+        let bold = if p.bold { "1;" } else { "" };
+        out.push_str(&format!("\x1b[{bold}{}m{}\x1b[0m", ansi_code(p.color), p.text));
+    }
+    out
+}
+
+/// Converts legacy `§` colour codes to ANSI for the server console.
+pub fn legacy_to_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    let mut used = false;
+    while let Some(c) = chars.next() {
+        if c != '§' {
+            out.push(c);
+            continue;
+        }
+        let Some(code) = chars.next() else { break };
+        let ansi = match code.to_ascii_lowercase() {
+            '0' => "30", '1' => "34", '2' => "32", '3' => "36", '4' => "31", '5' => "35", '6' => "33",
+            '7' => "37", '8' => "90", '9' => "94", 'a' => "92", 'b' => "96", 'c' => "91", 'd' => "95",
+            'e' => "93", 'f' => "97", 'l' => "1", 'r' => "0",
+            _ => continue,
+        };
+        out.push_str(&format!("\x1b[{ansi}m"));
+        used = true;
+    }
+    if used {
+        out.push_str("\x1b[0m");
+    }
+    out
+}
+
+#[cfg(test)]
+mod ansi_tests {
+    use super::*;
+    #[test]
+    fn converts() {
+        assert_eq!(legacy_to_ansi("§7a §fb"), "\x1b[37ma \x1b[97mb\x1b[0m");
+        assert_eq!(legacy_to_ansi("plain"), "plain");
+        assert_eq!(ansi(&[text("x", "green").bold()]), "\x1b[1;92mx\x1b[0m");
+    }
+}

@@ -15,11 +15,13 @@ pub struct Config {
     pub csv_interval_secs: u64,
     /// Count entities for each CSV line (walks every world's entity list).
     pub csv_count_entities: bool,
+    /// Colour console output (ANSI codes, like Pumpkin's own output).
+    pub console_colors: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { spike_threshold_ms: 100, warn_on_spike: true, spike_warn_cooldown_secs: 10, csv_interval_secs: 60, csv_count_entities: true }
+        Self { spike_threshold_ms: 100, warn_on_spike: true, spike_warn_cooldown_secs: 10, csv_interval_secs: 60, csv_count_entities: true, console_colors: true }
     }
 }
 

@@ -30,6 +30,8 @@ Built against Pumpkin commit `d1190dc` (plugin API v0.1).
 | `/perf report` | Writes a full report to `plugins/data/perfmon/report-<unix time>.txt`, including the last 1200 tick times |
 | `/perf reset` | Clears the tick history and spike list |
 
+In the server console, `/perf` output and perfmon's log lines are coloured.
+
 Output is clickable in game: a button bar under each result runs the other subcommands, numbers
 explain themselves on hover, spike tick numbers and report paths copy on click, and **[Reset]**
 only fills in the chat box so it can't be triggered by accident.
@@ -66,6 +68,7 @@ warn_on_spike = true            # log a console warning for spikes
 spike_warn_cooldown_secs = 10   # at most one warning per this many seconds
 csv_interval_secs = 60          # 0 turns the CSV log off
 csv_count_entities = true       # count entities for each CSV line
+console_colors = true           # coloured output in the server console (false = plain text)
 ```
 
 ## Permissions

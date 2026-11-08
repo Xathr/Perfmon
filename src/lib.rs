@@ -35,7 +35,8 @@ mod plugin {
         SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
     }
     fn log(level: pumpkin_plugin_api::logging::LogLevel, msg: &str) {
-        pumpkin_plugin_api::logging::log(level, &format!("[perfmon] {msg}"));
+        let tag = if cfg().console_colors { "\x1b[95m[perfmon]\x1b[0m" } else { "[perfmon]" };
+        pumpkin_plugin_api::logging::log(level, &format!("{tag} {msg}"));
     }
     fn cfg() -> Config {
         CONFIG.lock().unwrap().clone().unwrap_or_default()
@@ -45,10 +46,21 @@ mod plugin {
         f(g.get_or_insert_with(|| Stats::new(cfg().spike_threshold_ms * 1000)))
     }
     fn say(sender: &CommandSender, text: &str) {
-        sender.send_message(TextComponent::from_legacy_string(text));
+        if sender.is_console() {
+            // The console prints chat text uncoloured, so send it ANSI-coloured instead.
+            let t = if cfg().console_colors { chat::legacy_to_ansi(text) } else { strip_codes(text) };
+            sender.send_message(TextComponent::text(&t));
+        } else {
+            sender.send_message(TextComponent::from_legacy_string(text));
+        }
     }
     /// Sends a line with click and hover actions; falls back to plain text if the server rejects it.
     fn say_parts(sender: &CommandSender, parts: &[Part]) {
+        if sender.is_console() {
+            let t = if cfg().console_colors { chat::ansi(parts) } else { chat::plain(parts) };
+            sender.send_message(TextComponent::text(&t));
+            return;
+        }
         match TextComponent::from_json(&chat::line(parts)) {
             Ok(c) => sender.send_message(c),
             Err(_) => say(sender, &chat::plain(parts)),
@@ -88,7 +100,11 @@ mod plugin {
                         *last = t;
                         log(
                             pumpkin_plugin_api::logging::LogLevel::Warn,
-                            &format!("lag spike: tick {} took {:.1} ms (threshold {} ms). Run /perf spikes for history.", spike.tick, spike.duration_us as f64 / 1000.0, c.spike_threshold_ms),
+                            &if c.console_colors {
+                                format!("\x1b[93mlag spike:\x1b[0m tick {} took \x1b[91m{:.1} ms\x1b[0m (threshold {} ms). Run \x1b[96m/perf spikes\x1b[0m for history.", spike.tick, spike.duration_us as f64 / 1000.0, c.spike_threshold_ms)
+                            } else {
+                                format!("lag spike: tick {} took {:.1} ms (threshold {} ms). Run /perf spikes for history.", spike.tick, spike.duration_us as f64 / 1000.0, c.spike_threshold_ms)
+                            },
                         );
                     }
                 }

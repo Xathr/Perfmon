@@ -40,6 +40,7 @@ warn_on_spike = true            # log a console warning on spikes
 spike_warn_cooldown_secs = 10   # at most one warning per this many seconds
 csv_interval_secs = 60          # 0 turns the CSV log off
 csv_count_entities = true       # include the entity count in each CSV line
+console_colors = true           # coloured console output
 ```
 
 ## Permissions it asks for
