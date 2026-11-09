@@ -399,10 +399,10 @@ mod plugin {
         for line in update_lines(&status) {
             // Without the chat buttons, which mean nothing in the log.
             let parts: Vec<Part> = line.into_iter().filter(|p| !p.is_button()).collect();
-            let t = if config.console_colors { chat::ansi(&parts) } else { chat::plain(&parts) };
-            if !t.trim().is_empty() {
-                log(level, t.trim_end());
+            if chat::plain(&parts).trim().is_empty() {
+                continue;
             }
+            log(level, &if config.console_colors { chat::ansi(&parts) } else { chat::plain(&parts) });
         }
     }
 
@@ -476,7 +476,17 @@ mod plugin {
                         say(&sender, &format!("§cDownload failed: {e}"));
                     }
                     let status = UPDATE.lock().unwrap().clone();
-                    for line in update_lines(&status) { say_parts(&sender, &line); }
+                    for mut line in update_lines(&status) {
+                        if sender.is_console() {
+                            // Buttons cannot be clicked in the console.
+                            line.retain(|p| !p.is_button());
+                            if chat::plain(&line).trim().is_empty() { continue; }
+                        }
+                        say_parts(&sender, &line);
+                    }
+                    if sender.is_console() {
+                        say(&sender, "§8Commands: /perf update check, /perf update download");
+                    }
                 }
                 Action::Entities => {
                     let ec = count_entities(&server);
