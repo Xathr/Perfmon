@@ -8,7 +8,7 @@ Copy each field into the Store Listing form at market.pumpkinmc.org.
 | Category | Utilities (your draft already uses it; Admin Tools also fits) |
 | Pricing | Free |
 | Release channel | Beta |
-| Version | 0.3.0 |
+| Version | 0.3.1 |
 | Binary | `Perfmon.wasm` from the latest release of this repository |
 | Icon | `logo.png` (512×512) |
 | Screenshot | `screenshot-perf.png` (1600×900) |
