@@ -17,11 +17,17 @@ pub struct Config {
     pub csv_count_entities: bool,
     /// Colour console output (ANSI codes, like Pumpkin's own output).
     pub console_colors: bool,
+    /// Ask GitHub for the latest perfmon release when the server starts.
+    pub update_check: bool,
+    /// Tell operators in game, when they join, that a newer release is out.
+    pub update_notify_ops: bool,
+    /// Download a newer Perfmon.wasm into the data folder at startup, ready to be copied into plugins/.
+    pub update_download: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { spike_threshold_ms: 100, warn_on_spike: true, spike_warn_cooldown_secs: 10, csv_interval_secs: 60, csv_count_entities: true, console_colors: true }
+        Self { spike_threshold_ms: 100, warn_on_spike: true, spike_warn_cooldown_secs: 10, csv_interval_secs: 60, csv_count_entities: true, console_colors: true, update_check: true, update_notify_ops: true, update_download: false }
     }
 }
 
@@ -52,5 +58,7 @@ mod tests {
         let partial: super::Config = toml::from_str("spike_threshold_ms = 250").unwrap();
         assert_eq!(partial.spike_threshold_ms, 250);
         assert_eq!(partial.csv_interval_secs, 60);
+        // A config written by an older version has no update settings: the defaults apply.
+        assert!(partial.update_check && partial.update_notify_ops && !partial.update_download);
     }
 }

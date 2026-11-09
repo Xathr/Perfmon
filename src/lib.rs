@@ -3,24 +3,30 @@
 //! It times every server tick through the tick-end event, keeps 15 minutes of history, flags lag
 //! spikes, counts entities per world, reports system and plugin memory, and appends a metrics
 //! line to `plugins/data/perfmon/metrics.csv` on a fixed interval. Everything is reachable with
-//! the `/perf` command (aliases `/tps`, `/lag`).
+//! the `/perf` command (aliases `/tps`, `/lag`). At startup it asks GitHub whether a newer release
+//! is out.
 
 #![allow(non_snake_case)] // the library is named Perfmon so the plugin file is Perfmon.wasm
 
 pub mod banner;
 pub mod chat;
 pub mod config;
+#[cfg(target_arch = "wasm32")]
+mod http;
 pub mod stats;
+pub mod update;
 
 #[cfg(target_arch = "wasm32")]
 mod plugin {
     use crate::chat::{self, Part, button, text};
     use crate::config::Config;
-    use crate::stats::{Stats, human_bytes, mspt_colour, tps_colour};
+    use crate::http;
+    use crate::stats::{Bucket, Stats, bar, human_bytes, mspt_colour, tps_colour};
+    use crate::update::{self, Release, Status};
     use pumpkin_plugin_api::command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs};
     use pumpkin_plugin_api::commands::CommandHandler;
-    use pumpkin_plugin_api::events::{EventHandler, EventPriority, ServerTickEndEvent};
-    use pumpkin_plugin_api::permission::{Permission, PermissionDefault};
+    use pumpkin_plugin_api::events::{EventHandler, EventPriority, PlayerJoinEvent, ServerTickEndEvent};
+    use pumpkin_plugin_api::permission::{Permission, PermissionDefault, PermissionLevel};
     use pumpkin_plugin_api::scheduler::SchedulerExt;
     use pumpkin_plugin_api::text::TextComponent;
     use pumpkin_plugin_api::{Context, Plugin, PluginMetadata, Server, permissions, register_plugin};
@@ -33,6 +39,13 @@ mod plugin {
     static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
     static LAST_WARN: Mutex<u64> = Mutex::new(0);
     static FOLDER: Mutex<String> = Mutex::new(String::new());
+    static UPDATE: Mutex<Status> = Mutex::new(Status::Off);
+
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+    /// Where a downloaded update is saved, as the server admin sees it.
+    const UPDATE_FILE: &str = "plugins/data/perfmon/update/Perfmon.wasm";
+    /// Ticks to wait after a player joins before telling them about an update.
+    const JOIN_NOTICE_DELAY_TICKS: u64 = 60;
 
     fn now() -> u64 {
         SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
@@ -81,13 +94,20 @@ mod plugin {
         say_parts(sender, &[
             button("Refresh", "/perf", "TPS, tick times, players and memory"),
             text(" ", "gray"),
-            button("Entities", "/perf entities", "Entity and player counts per dimension"),
-            text(" ", "gray"),
-            button("Memory", "/perf heap", "Machine memory and CPU threads"),
+            button("Graph", "/perf graph", "Tick times over the last minute and 15 minutes"),
             text(" ", "gray"),
             button("Spikes", "/perf spikes", "The most recent lag spikes"),
             text(" ", "gray"),
+            button("Entities", "/perf entities", "Entity and player counts per dimension"),
+            text(" ", "gray"),
+            button("Ping", "/perf ping", "Every player's ping"),
+        ]);
+        say_parts(sender, &[
+            button("Memory", "/perf heap", "Machine memory and CPU threads"),
+            text(" ", "gray"),
             button("Report", "/perf report", "Write everything to a report file"),
+            text(" ", "gray"),
+            button("Update", "/perf update", "Whether a newer perfmon release is out"),
             text(" ", "gray"),
             text("[Reset]", "red").suggest("/perf reset").hover("Clear the tick history and spike list\nClick to put /perf reset in the chat box"),
         ]);
@@ -121,6 +141,124 @@ mod plugin {
             }
             e
         }
+    }
+
+    /// Asks GitHub for the latest release and compares it with the running version.
+    fn check_update() -> Status {
+        match http::get(update::LATEST_URL, 512 * 1024).and_then(|body| update::parse_release(&body)) {
+            Ok(release) if update::is_newer(&release.tag, VERSION) => Status::Available { release, downloaded: None },
+            Ok(release) => Status::Current { latest: release.tag },
+            Err(e) => Status::Failed(e),
+        }
+    }
+
+    /// Saves the release's Perfmon.wasm in the data folder, after checking it against the SHA-256
+    /// published with the release. A plugin cannot write to plugins/, so the admin copies it over.
+    fn download_update(release: &Release) -> Result<(), String> {
+        let (Some(wasm_url), Some(sha256_url)) = (&release.wasm_url, &release.sha256_url) else {
+            return Err(format!("release {} has no Perfmon.wasm with a checksum", release.tag));
+        };
+        let want = update::parse_sha256_file(&String::from_utf8_lossy(&http::get(sha256_url, 4096)?)).ok_or("unreadable checksum file")?;
+        let dir = format!("{}/update", FOLDER.lock().unwrap());
+        let path = format!("{dir}/{}", update::ASSET);
+        if std::fs::read(&path).is_ok_and(|have| update::sha256_hex(&have) == want) {
+            return Ok(()); // already downloaded
+        }
+        let data = http::get(wasm_url, 32 * 1024 * 1024)?;
+        if update::sha256_hex(&data) != want {
+            return Err("the download does not match its published checksum; nothing was saved".into());
+        }
+        std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, data)).map_err(|e| format!("{UPDATE_FILE}: {e}"))
+    }
+
+    /// Downloads the available update, if there is one, and records where it went.
+    fn download_available() -> Result<(), String> {
+        let Status::Available { release, .. } = UPDATE.lock().unwrap().clone() else {
+            return Err("there is no newer release to download".into());
+        };
+        download_update(&release)?;
+        *UPDATE.lock().unwrap() = Status::Available { release, downloaded: Some(UPDATE_FILE.into()) };
+        Ok(())
+    }
+
+    /// The update status as chat lines; shown by /perf update and logged at startup.
+    fn update_lines(status: &Status) -> Vec<Vec<Part>> {
+        let check = button("Check now", "/perf update check", "Ask GitHub for the latest release.\nThe server may pause for a moment while it answers.");
+        match status {
+            Status::Off => vec![vec![text("Update check is off (update_check = false in config.toml). ", "gray"), check]],
+            Status::Current { latest } => vec![vec![text(format!("perfmon v{VERSION} is up to date (latest release: {latest}). "), "green"), check]],
+            Status::Failed(why) => vec![vec![text(format!("Update check failed: {why}. "), "red"), check]],
+            Status::Available { release, downloaded } => {
+                let mut lines = vec![
+                    vec![text(format!("perfmon {} is out", release.tag), "yellow").bold(), text(format!(" (this server runs v{VERSION})."), "gray")],
+                    vec![text("Release notes: ", "gray"), text(release.page_url.clone(), "aqua").open(release.page_url.clone()).hover("Click to open the release page")],
+                ];
+                lines.push(match downloaded {
+                    Some(path) => vec![
+                        text("Downloaded and verified: ", "green"),
+                        text(path.clone(), "white").copy(path.clone()).hover("Click to copy the path"),
+                        text(". Stop the server and copy it over plugins/Perfmon.wasm.", "gray"),
+                    ],
+                    None => vec![
+                        button("Download", "/perf update download", "Save the new Perfmon.wasm in plugins/data/perfmon/update/\nand check it against the release's SHA-256.\nThe server may pause for a moment while it downloads."),
+                        text(" ", "gray"),
+                        check,
+                    ],
+                });
+                lines
+            }
+        }
+    }
+
+    fn may_use_perf(player: &pumpkin_plugin_api::Player) -> bool {
+        player.has_permission("perfmon:perf") || matches!(player.get_permission_level(), PermissionLevel::Two | PermissionLevel::Three | PermissionLevel::Four)
+    }
+
+    /// Tells operators about a newer release shortly after they join.
+    struct UpdateNotice;
+    impl EventHandler<PlayerJoinEvent> for UpdateNotice {
+        fn handle(&self, _server: Server, e: <PlayerJoinEvent as pumpkin_plugin_api::FromIntoEvent>::Data) -> <PlayerJoinEvent as pumpkin_plugin_api::FromIntoEvent>::Data {
+            let available = matches!(*UPDATE.lock().unwrap(), Status::Available { .. });
+            if available && cfg().update_notify_ops && may_use_perf(&e.player) {
+                let id = e.player.get_id();
+                pumpkin_plugin_api::scheduler::schedule_delayed_task(JOIN_NOTICE_DELAY_TICKS, move |server| {
+                    let Status::Available { release, .. } = UPDATE.lock().unwrap().clone() else { return };
+                    let Some(player) = server.get_player_by_uuid(id) else { return };
+                    let line = chat::line(&[
+                        text("[Perfmon] ", "light_purple"),
+                        text(format!("{} is out", release.tag), "yellow"),
+                        text(format!(" (this server runs v{VERSION}). "), "gray"),
+                        text("[Release notes]", "aqua").open(release.page_url.clone()).hover(release.page_url.clone()),
+                        text(" ", "gray"),
+                        button("Details", "/perf update", "Update status and download"),
+                    ]);
+                    if let Ok(component) = TextComponent::from_json(&line) {
+                        player.send_system_message(component, false);
+                    }
+                });
+            }
+            e
+        }
+    }
+
+    /// One row of /perf graph: a bar per bucket, coloured and sized by its slowest tick.
+    fn graph_row(sender: &CommandSender, title: &str, buckets: &[Option<Bucket>], secs_per_bar: usize) {
+        let top = buckets.iter().flatten().map(|b| b.max_ms).fold(50.0, f64::max);
+        say(sender, &format!("§7{title}: {secs_per_bar} s per bar, full height = §f{top:.0} ms"));
+        let n = buckets.len();
+        let bars: Vec<Part> = buckets
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let (from, to) = ((n - i) * secs_per_bar, (n - i - 1) * secs_per_bar);
+                match b {
+                    Some(b) => text(bar(b.max_ms, top).to_string(), chat::mspt_color(b.max_ms))
+                        .hover(format!("{from} to {to} s ago\nSlowest tick: {:.1} ms\nAverage: {:.1} ms\n{} ticks", b.max_ms, b.mean_ms, b.ticks)),
+                    None => text(bar(0.0, top).to_string(), "dark_gray").hover(format!("{from} to {to} s ago\nNo ticks recorded yet")),
+                }
+            })
+            .collect();
+        say_parts(sender, &bars);
     }
 
     struct EntityCounts {
@@ -220,7 +358,7 @@ mod plugin {
             text.push_str(&format!("  unix {} tick {}: {:.1} ms\n", s.unix_secs, s.tick, s.duration_us as f64 / 1000.0));
         }
         let info = server.get_sys_info();
-        text.push_str(&format!("\nPumpkin {} on {} {}\n", info.pumpkin_version, info.os_name.unwrap_or_default(), info.os_version.unwrap_or_default()));
+        text.push_str(&format!("\nperfmon {VERSION}, Pumpkin {} on {} {}\n", info.pumpkin_version, info.os_name.unwrap_or_default(), info.os_version.unwrap_or_default()));
         text.push_str("\nLast 1200 tick durations in microseconds, oldest first:\n");
         let ticks = with_stats(|s| s.recent(1200));
         text.push_str(&ticks.iter().map(u64::to_string).collect::<Vec<_>>().join(","));
@@ -243,8 +381,33 @@ mod plugin {
         let _ = writeln!(f, "{},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{},{}", now(), m1.tps, m1.mean_ms, m1.p95_ms, m1.max_ms, m1.over_budget, spikes, server.get_player_count(), ec, mem, plugin_heap_bytes());
     }
 
+    /// Checks for a newer release while the server is still starting, so no tick waits for GitHub.
+    fn startup_update_check(config: &Config) {
+        use pumpkin_plugin_api::logging::LogLevel;
+        *UPDATE.lock().unwrap() = check_update();
+        if config.update_download
+            && matches!(*UPDATE.lock().unwrap(), Status::Available { .. })
+            && let Err(e) = download_available()
+        {
+            log(LogLevel::Warn, &format!("could not download the update: {e}"));
+        }
+        let status = UPDATE.lock().unwrap().clone();
+        let level = match status {
+            Status::Available { .. } => LogLevel::Warn,
+            _ => LogLevel::Info,
+        };
+        for line in update_lines(&status) {
+            // Without the chat buttons, which mean nothing in the log.
+            let parts: Vec<Part> = line.into_iter().filter(|p| !p.is_button()).collect();
+            let t = if config.console_colors { chat::ansi(&parts) } else { chat::plain(&parts) };
+            if !t.trim().is_empty() {
+                log(level, t.trim_end());
+            }
+        }
+    }
+
     #[derive(Clone, Copy)]
-    enum Action { Summary, Entities, Heap, Spikes, Report, Reset, Help }
+    enum Action { Summary, Graph, Ping, Entities, Heap, Spikes, Report, Reset, Update, UpdateCheck, UpdateDownload, Help }
     struct Perf(Action);
     impl CommandHandler for Perf {
         fn handle(&self, sender: CommandSender, server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
@@ -278,6 +441,42 @@ mod plugin {
                     if let Some(l) = lines.get(5) { say(&sender, l); }
                     for l in memory_lines(&server) { say(&sender, &l); }
                     nav(&sender);
+                }
+                Action::Graph => {
+                    let (minute, quarter) = with_stats(|s| (s.buckets(30, 40), s.buckets(30, 600)));
+                    say(&sender, "§6§l== Tick times ==");
+                    graph_row(&sender, "Last minute", &minute, 2);
+                    graph_row(&sender, "Last 15 minutes", &quarter, 30);
+                    say(&sender, "§8Oldest on the left. A bar is the slowest tick in its time span: green up to 40 ms, yellow up to 50, red over.");
+                    nav(&sender);
+                }
+                Action::Ping => {
+                    let mut pings: Vec<(String, u32)> = server.get_all_players().iter().map(|p| (p.get_name(), p.get_ping())).collect();
+                    pings.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                    if pings.is_empty() {
+                        say(&sender, "§6§l== Ping ==");
+                        say(&sender, "§7No players online.");
+                    } else {
+                        let mean = pings.iter().map(|p| p.1 as f64).sum::<f64>() / pings.len() as f64;
+                        say(&sender, &format!("§6§l== Ping: {} players, average {mean:.0} ms ==", pings.len()));
+                        for (name, ms) in pings.iter().take(15) {
+                            say_parts(&sender, &[text(format!("{name}: "), "gray"), text(format!("{ms} ms"), chat::ping_color(*ms))]);
+                        }
+                        if pings.len() > 15 {
+                            say(&sender, &format!("§8and {} more with lower ping", pings.len() - 15));
+                        }
+                    }
+                    nav(&sender);
+                }
+                Action::Update | Action::UpdateCheck | Action::UpdateDownload => {
+                    if matches!(self.0, Action::UpdateCheck) {
+                        *UPDATE.lock().unwrap() = check_update();
+                    }
+                    if matches!(self.0, Action::UpdateDownload) && let Err(e) = download_available() {
+                        say(&sender, &format!("§cDownload failed: {e}"));
+                    }
+                    let status = UPDATE.lock().unwrap().clone();
+                    for line in update_lines(&status) { say_parts(&sender, &line); }
                 }
                 Action::Entities => {
                     let ec = count_entities(&server);
@@ -320,7 +519,7 @@ mod plugin {
                     say_parts(&sender, &[text("Tick history and spike list cleared. ", "green"), button("Refresh", "/perf", "Show the summary")]);
                 }
                 Action::Help => {
-                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf entities", "entity counts per world and by type"), ("/perf heap", "memory"), ("/perf spikes", "recent lag spikes"), ("/perf report", "write a full report file"), ("/perf reset", "clear history")] {
+                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf graph", "tick times as a bar graph"), ("/perf spikes", "recent lag spikes"), ("/perf entities", "entity counts per world and by type"), ("/perf ping", "every player's ping"), ("/perf heap", "memory"), ("/perf report", "write a full report file"), ("/perf update", "check for a newer perfmon release"), ("/perf reset", "clear history")] {
                         let c = text(cmd, "gold");
                         let c = if cmd == "/perf reset" { c.suggest(cmd) } else { c.run(cmd) };
                         say_parts(&sender, &[c.hover(format!("Click for {cmd}")), text(format!(" {what}"), "gray")]);
@@ -345,7 +544,8 @@ mod plugin {
                 permissions: vec![
                     permissions::SYS_INFO.into(),      // memory, CPU and OS for /perf heap
                     permissions::FS_READ_DATA.into(),  // config.toml
-                    permissions::FS_WRITE_DATA.into(), // config.toml, metrics.csv, reports
+                    permissions::FS_WRITE_DATA.into(), // config.toml, metrics.csv, reports, downloaded updates
+                    permissions::HTTP_OUTBOUND.into(), // update check against GitHub releases
                 ],
             }
         }
@@ -362,11 +562,18 @@ mod plugin {
             let _ = context.register_permission(&Permission {
                 node: "perfmon:perf".into(),
                 description: "Use /perf".into(),
-                default: PermissionDefault::Op(pumpkin_plugin_api::permission::PermissionLevel::Two),
+                default: PermissionDefault::Op(PermissionLevel::Two),
                 children: vec![],
             });
             let mut cmd = Command::new(&["perf".to_string(), "tps".to_string(), "lag".to_string()], "Server performance and debug info");
-            for (name, action) in [("entities", Action::Entities), ("heap", Action::Heap), ("memory", Action::Heap), ("spikes", Action::Spikes), ("report", Action::Report), ("reset", Action::Reset), ("help", Action::Help)] {
+            context.register_event_handler::<PlayerJoinEvent, _>(UpdateNotice, EventPriority::Lowest, false)?;
+            cmd = cmd.then(
+                CommandNode::literal("update")
+                    .then(CommandNode::literal("check").execute(Perf(Action::UpdateCheck)))
+                    .then(CommandNode::literal("download").execute(Perf(Action::UpdateDownload)))
+                    .execute(Perf(Action::Update)),
+            );
+            for (name, action) in [("graph", Action::Graph), ("ping", Action::Ping), ("entities", Action::Entities), ("heap", Action::Heap), ("memory", Action::Heap), ("spikes", Action::Spikes), ("report", Action::Report), ("reset", Action::Reset), ("help", Action::Help)] {
                 cmd = cmd.then(CommandNode::literal(name).execute(Perf(action)));
             }
             context.register_command(cmd.execute(Perf(Action::Summary)), "perf");
@@ -376,13 +583,18 @@ mod plugin {
                 context.schedule_repeating_task(period, period, |server| append_csv(&server));
             }
             let info = crate::banner::Info {
-                version: env!("CARGO_PKG_VERSION"),
+                version: VERSION,
                 spike_threshold_ms: config.spike_threshold_ms,
                 warn_on_spike: config.warn_on_spike,
                 csv_interval_secs: config.csv_interval_secs,
+                update_check: config.update_check,
+                update_download: config.update_download,
             };
             for line in crate::banner::lines(&info, config.console_colors) {
                 log(pumpkin_plugin_api::logging::LogLevel::Info, &line);
+            }
+            if config.update_check {
+                startup_update_check(&config);
             }
             Ok(())
         }

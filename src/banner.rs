@@ -20,6 +20,8 @@ pub struct Info<'a> {
     pub spike_threshold_ms: u64,
     pub warn_on_spike: bool,
     pub csv_interval_secs: u64,
+    pub update_check: bool,
+    pub update_download: bool,
 }
 
 fn paint(colors: bool, code: &str, s: &str) -> String {
@@ -48,10 +50,16 @@ pub fn lines(info: &Info, colors: bool) -> Vec<String> {
     } else {
         p("93", "off")
     };
+    let updates = match (info.update_check, info.update_download) {
+        (false, _) => p("93", "off"),
+        (true, false) => "check at startup".to_string(),
+        (true, true) => "check and download at startup".to_string(),
+    };
     let commands = [p("96", "/perf"), p("96", "/tps"), p("96", "/lag")].join("  ");
     for (key, value) in [
         ("spike threshold", format!("{} {}", p("97", &threshold), p("90", "(warnings ") + &warnings + &p("90", ")"))),
         ("metrics log", csv),
+        ("updates", updates),
         ("commands", commands),
     ] {
         out.push(format!("  {} {}", p("90", &format!("{key:<16}")), value));
@@ -64,7 +72,7 @@ mod tests {
     use super::*;
 
     fn info() -> Info<'static> {
-        Info { version: "1.2.3", spike_threshold_ms: 100, warn_on_spike: true, csv_interval_secs: 60 }
+        Info { version: "1.2.3", spike_threshold_ms: 100, warn_on_spike: true, csv_interval_secs: 60, update_check: true, update_download: false }
     }
 
     #[test]
@@ -87,6 +95,14 @@ mod tests {
         for line in lines(&info(), true) {
             assert_eq!(line.matches("\x1b[0m").count(), line.matches("\x1b[").count() / 2, "{line:?}");
         }
+    }
+
+    #[test]
+    fn update_setting_is_shown() {
+        let row = |i: Info| lines(&i, false).into_iter().find(|l| l.contains("updates")).unwrap();
+        assert!(row(info()).ends_with("check at startup"));
+        assert!(row(Info { update_download: true, ..info() }).ends_with("check and download at startup"));
+        assert!(row(Info { update_check: false, update_download: true, ..info() }).ends_with("off"));
     }
 
     #[test]

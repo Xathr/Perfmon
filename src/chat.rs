@@ -37,6 +37,15 @@ impl Part {
         self.click = Some(("copy_to_clipboard", value.into()));
         self
     }
+    /// Opens `url` in the player's browser when clicked (the client asks first).
+    pub fn open(mut self, url: impl Into<String>) -> Self {
+        self.click = Some(("open_url", url.into()));
+        self
+    }
+    /// True for parts that run a command when clicked, which only make sense in chat.
+    pub fn is_button(&self) -> bool {
+        self.click.as_ref().is_some_and(|(action, _)| *action == "run_command")
+    }
     pub fn hover(mut self, t: impl Into<String>) -> Self {
         self.hover = Some(t.into());
         self
@@ -50,6 +59,7 @@ impl Part {
         if let Some((action, value)) = &self.click {
             v["click_event"] = match *action {
                 "copy_to_clipboard" => json!({ "action": action, "value": value }),
+                "open_url" => json!({ "action": action, "url": value }),
                 _ => json!({ "action": action, "command": value }),
             };
         }
@@ -73,6 +83,11 @@ pub fn plain(parts: &[Part]) -> String {
 /// A clickable `[label]` button that runs a command.
 pub fn button(label: &str, command: &str, hover: &str) -> Part {
     text(format!("[{label}]"), "aqua").run(command).hover(format!("{hover}\nClick to run {command}"))
+}
+
+/// Colour name for a player's ping in ms.
+pub fn ping_color(ms: u32) -> &'static str {
+    if ms <= 100 { "green" } else if ms <= 250 { "yellow" } else { "red" }
 }
 
 /// Colour name for a TPS value: green, yellow, red.
@@ -106,6 +121,8 @@ mod tests {
         let v: Value = serde_json::from_str(&line(&[text("a", "white").copy("x"), text("b", "white").suggest("/perf reset")])).unwrap();
         assert_eq!(v["extra"][0]["click_event"], json!({"action": "copy_to_clipboard", "value": "x"}));
         assert_eq!(v["extra"][1]["click_event"], json!({"action": "suggest_command", "command": "/perf reset"}));
+        let v: Value = serde_json::from_str(&line(&[text("page", "aqua").open("https://example.com/x")])).unwrap();
+        assert_eq!(v["extra"][0]["click_event"], json!({"action": "open_url", "url": "https://example.com/x"}));
     }
 
     #[test]

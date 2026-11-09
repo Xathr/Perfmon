@@ -1,6 +1,6 @@
 [package]
 name = "perfmon"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2024"
 license = "GPL-3.0"
 description = "Pumpkin plugin: tick timing, lag spikes, entity counts and memory, with in-game commands and a CSV log"
@@ -17,6 +17,11 @@ pumpkin-plugin-api = { git = "https://github.com/Pumpkin-MC/Pumpkin.git", rev = 
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 serde_json = "1"
+sha2 = "0.10"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# wasi:http, for the update check
+wasi = "0.14"
 
 [profile.release]
 opt-level = 3

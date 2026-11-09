@@ -26,6 +26,14 @@ pub struct Summary {
     pub over_budget: usize,
 }
 
+/// A run of consecutive ticks drawn as one bar of `/perf graph`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bucket {
+    pub ticks: usize,
+    pub mean_ms: f64,
+    pub max_ms: f64,
+}
+
 pub struct Stats {
     durations: VecDeque<u64>,
     spikes: VecDeque<Spike>,
@@ -84,6 +92,25 @@ impl Stats {
         self.durations.iter().skip(skip).copied().collect()
     }
 
+    /// The last `count * per_bucket` ticks in `count` buckets of `per_bucket` ticks, oldest first.
+    /// The newest bucket is always last; buckets from before any tick was recorded are `None`.
+    pub fn buckets(&self, count: usize, per_bucket: usize) -> Vec<Option<Bucket>> {
+        let v = self.recent(count * per_bucket);
+        let mut out: Vec<Option<Bucket>> = v
+            .rchunks(per_bucket.max(1))
+            .map(|c| {
+                Some(Bucket {
+                    ticks: c.len(),
+                    mean_ms: c.iter().sum::<u64>() as f64 / c.len() as f64 / 1000.0,
+                    max_ms: c.iter().copied().max().unwrap_or(0) as f64 / 1000.0,
+                })
+            })
+            .collect();
+        out.resize(count, None);
+        out.reverse();
+        out
+    }
+
     /// Statistics over the last `ticks` ticks (fewer if not that many were recorded).
     pub fn summary(&self, ticks: usize) -> Summary {
         let mut v = self.recent(ticks);
@@ -124,6 +151,15 @@ pub fn human_bytes(b: u64) -> String {
         i += 1;
     }
     if i == 0 { format!("{b} B") } else { format!("{v:.1} {}", U[i]) }
+}
+
+/// The bar for `value` on a graph whose top is `top`: one of eight heights.
+pub fn bar(value: f64, top: f64) -> char {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    if top <= 0.0 || value <= 0.0 {
+        return BARS[0];
+    }
+    BARS[((value / top * 8.0).ceil() as usize).clamp(1, 8) - 1]
 }
 
 /// Legacy colour code for a TPS value: green, yellow, red.
@@ -177,6 +213,36 @@ mod tests {
         assert!((m.max_ms - 99.0).abs() < 1e-9);
         assert!(m.p50_ms > 45.0 && m.p50_ms < 55.0);
         assert!(m.p99_ms >= 97.0);
+    }
+
+    #[test]
+    fn buckets_end_at_the_newest_tick() {
+        let mut s = Stats::new(u64::MAX);
+        assert_eq!(s.buckets(3, 20), vec![None, None, None]);
+        for t in 0..50u64 {
+            s.record(t as i32, (t + 1) * 1000, 0);
+        }
+        // 50 ticks in buckets of 20: the oldest bucket only has ticks 1..=10.
+        let b = s.buckets(4, 20);
+        assert_eq!(b[0], None);
+        assert_eq!(b[1].unwrap().ticks, 10);
+        assert!((b[1].unwrap().max_ms - 10.0).abs() < 1e-9);
+        let newest = b[3].unwrap();
+        assert_eq!(newest.ticks, 20);
+        assert!((newest.max_ms - 50.0).abs() < 1e-9);
+        assert!((newest.mean_ms - 40.5).abs() < 1e-9);
+        // Only the newest ticks are used when the window is shorter than the history.
+        assert!((s.buckets(1, 5)[0].unwrap().mean_ms - 48.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bars() {
+        assert_eq!(bar(0.0, 50.0), '▁');
+        assert_eq!(bar(1.0, 50.0), '▁');
+        assert_eq!(bar(25.0, 50.0), '▄');
+        assert_eq!(bar(50.0, 50.0), '█');
+        assert_eq!(bar(500.0, 50.0), '█');
+        assert_eq!(bar(5.0, 0.0), '▁');
     }
 
     #[test]

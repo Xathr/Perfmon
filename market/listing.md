@@ -8,7 +8,7 @@ Copy each field into the Store Listing form at market.pumpkinmc.org.
 | Category | Utilities (your draft already uses it; Admin Tools also fits) |
 | Pricing | Free |
 | Release channel | Beta |
-| Version | 0.2.5 |
+| Version | 0.3.0 |
 | Binary | `Perfmon.wasm` from the latest release of this repository |
 | Icon | `logo.png` (512×512) |
 | Screenshot | `screenshot-perf.png` (1600×900) |
@@ -21,12 +21,17 @@ Copy each field into the Store Listing form at market.pumpkinmc.org.
 | Name | Aliases | Permission | Description |
 |---|---|---|---|
 | `perf` | `tps, lag` | `perfmon:perf` | Shows TPS, tick-time percentiles, lag spikes, players and memory |
+| `perf graph` | | `perfmon:perf` | Shows tick times as bar graphs for the last minute and the last 15 minutes |
+| `perf ping` | | `perfmon:perf` | Lists every player's ping and the average |
 | `perf entities` | | `perfmon:perf` | Shows entity and player counts per dimension and the top mob types |
 | `perf heap` | `perf memory` | `perfmon:perf` | Shows machine memory, CPU threads and perfmon's own memory |
 | `perf spikes` | | `perfmon:perf` | Lists the 10 most recent lag spikes |
 | `perf report` | | `perfmon:perf` | Writes a full performance report to plugins/data/perfmon |
+| `perf update` | | `perfmon:perf` | Shows whether a newer perfmon release is out |
+| `perf update check` | | `perfmon:perf` | Asks GitHub for the latest release now |
+| `perf update download` | | `perfmon:perf` | Downloads the new Perfmon.wasm into plugins/data/perfmon/update |
 | `perf reset` | | `perfmon:perf` | Clears the tick history and spike list |
 
 ## Short tagline
 
-Real TPS, tick-time percentiles, lag spike alerts, entity counts and memory, with a CSV log.
+Real TPS, tick-time percentiles and graphs, lag spike alerts, entity counts, ping and memory, with a CSV log.
