@@ -17,11 +17,11 @@ pub struct Config {
     pub csv_count_entities: bool,
     /// Colour console output (ANSI codes, like Pumpkin's own output).
     pub console_colors: bool,
-    /// Ask GitHub for the latest perfmon release when the server starts.
+    /// Ask the Pumpkin Market for the latest perfmon version when the server starts.
     pub update_check: bool,
-    /// Tell operators in game, when they join, that a newer release is out.
+    /// Tell operators in game, when they join, that a newer version is out.
     pub update_notify_ops: bool,
-    /// Download a newer Perfmon.wasm into the data folder at startup, ready to be copied into plugins/.
+    /// Download a newer, Market-signed Perfmon.wasm into the data folder at startup, ready to be copied into plugins/.
     pub update_download: bool,
 }
 

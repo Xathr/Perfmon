@@ -16,7 +16,7 @@
 - 📝 **One-command reports**: `/perf report` writes everything, including the last 1,200 tick times, to a text file you can share
 - 📈 **CSV metrics log**: one line a minute in `metrics.csv`, ready to graph in any spreadsheet
 - 🖱️ **Clickable chat**: a button bar under every result, hover explanations on each number, click-to-copy report paths
-- 🔔 **Update check**: tells the console and operators when a newer release is out, and can download it, verified by SHA-256
+- 🔔 **Update check**: tells the console and operators when a newer version is on the Market, and can download the signed file, checking its signature first
 - 🎨 Colour coded: green is healthy, yellow is close to the limit, red is lagging
 - 🖥️ **Startup banner** with the spike threshold, CSV log and commands, and every console line tagged `[Perfmon]`, including `/perf` output in the console
 - 🪶 Lightweight: one small event per tick, no extra threads, about 1 MB of memory
@@ -32,7 +32,7 @@
 | `/perf heap` | Memory and CPU threads |
 | `/perf spikes` | The 10 most recent lag spikes |
 | `/perf report` | Writes a full report file |
-| `/perf update` | Whether a newer release is out; `check` asks again, `download` fetches it |
+| `/perf update` | Whether a newer version is out; `check` asks again, `download` fetches it |
 | `/perf reset` | Clears the history |
 
 `/tps` and `/lag` work as aliases. Commands need operator level 2 or the `perfmon:perf` permission.
@@ -48,9 +48,9 @@ spike_warn_cooldown_secs = 10   # at most one warning per this many seconds
 csv_interval_secs = 60          # 0 turns the CSV log off
 csv_count_entities = true       # include the entity count in each CSV line
 console_colors = true           # coloured console output
-update_check = true             # ask GitHub for the latest release at startup
-update_notify_ops = true        # tell operators in game when a newer release is out
-update_download = false         # download a newer Perfmon.wasm into the data folder at startup
+update_check = true             # ask the Pumpkin Market for the latest version at startup
+update_notify_ops = true        # tell operators in game when a newer version is out
+update_download = false         # download a newer, signed Perfmon.wasm into the data folder at startup
 ```
 
 ## Permissions it asks for
@@ -60,7 +60,7 @@ update_download = false         # download a newer Perfmon.wasm into the data fo
 | `sys.info` | Machine memory and CPU thread count |
 | `fs.read.data` | Reading its config |
 | `fs.write.data` | Its config, `metrics.csv`, reports and downloaded updates, only inside its own data folder |
-| `http.outbound` | The update check: a GET of the public release data on GitHub, and the download if you ask for it |
+| `http.outbound` | The update check: a GET of this plugin's latest version from the Pumpkin Market, and the signed download if you ask for it |
 
 The update check is perfmon's only network use, and nothing about your server is sent. Turn it off with `update_check = false`, or block `http.outbound`.
 

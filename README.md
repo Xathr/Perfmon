@@ -4,14 +4,15 @@
 
 `Perfmon.wasm` is a [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin) plugin. It times every server
 tick, keeps 15 minutes of history, flags lag spikes, graphs tick times, counts entities, reports
-memory and player ping, logs metrics to a CSV file, and tells you when a newer release is out.
+memory and player ping, logs metrics to a CSV file, and tells you when a newer version is out.
 
 ![/perf in game](market/screenshot-perf.png)
 
 ## Install
 
-1. Download `Perfmon.wasm` from the [latest release](https://github.com/Xathr/Perfmon/releases/latest),
-   or install it from the Pumpkin Market.
+1. Download `Perfmon.wasm` from the [Pumpkin Market](https://market.pumpkinmc.org/plugin/ID0WVaaw),
+   which signs it so Pumpkin loads it as verified. An unsigned build is on the
+   [latest GitHub release](https://github.com/Xathr/Perfmon/releases/latest).
 2. Put it in your server's `plugins/` folder.
 3. Pre-approve its permissions in `pumpkin.toml` (see [Permissions](#permissions)) and restart.
 
@@ -30,7 +31,7 @@ Built against Pumpkin 0.2.2 (commit `eda6944`, plugin API v0.1).
 | `/perf heap` | System memory, CPU threads, and this plugin's own sandbox memory |
 | `/perf spikes` | The 10 most recent lag spikes, with how long ago and how long they took |
 | `/perf report` | Writes a full report to `plugins/data/perfmon/report-<unix time>.txt`, including the last 1200 tick times |
-| `/perf update` | Whether a newer perfmon release is out (see [Updates](#updates)) |
+| `/perf update` | Whether a newer perfmon version is out (see [Updates](#updates)) |
 | `/perf reset` | Clears the tick history and spike list |
 
 In the server console, `/perf` output and perfmon's log lines are coloured.
@@ -44,28 +45,31 @@ server sleeps for the rest. Colours: green is healthy, yellow is close to the li
 
 ## Updates
 
-When the server starts, perfmon asks GitHub for its [latest release](https://github.com/Xathr/Perfmon/releases/latest)
-and compares it with the version that is running. If a newer one is out it says so in the console,
-and tells operators in game a few seconds after they join, with a link to the release notes.
+When the server starts, perfmon asks the [Pumpkin Market](https://market.pumpkinmc.org/plugin/ID0WVaaw)
+for its latest version and compares it with the one that is running. If a newer one is out it says
+so in the console, and tells operators in game a few seconds after they join, with a link to the
+Market page.
 
 | Command | Does |
 |---|---|
 | `/perf update` | Shows what the last check found |
-| `/perf update check` | Asks GitHub again now |
-| `/perf update download` | Saves the new `Perfmon.wasm` to `plugins/data/perfmon/update/Perfmon.wasm` |
+| `/perf update check` | Asks the Market again now |
+| `/perf update download` | Saves the Market's signed `Perfmon.wasm` to `plugins/data/perfmon/update/Perfmon.wasm` |
 
-A download is checked against the SHA-256 published with the release, and is not saved if it does
-not match. Pumpkin does not let a plugin write to `plugins/`, so the last step is yours: stop the
+The download is the file the Market signs, so Pumpkin loads it as a verified plugin. Before saving
+it, perfmon checks the signature against the Market's key, the way Pumpkin does when it loads a
+plugin, and that the file really is the announced perfmon version. A file that fails is not saved.
+Pumpkin does not let a plugin write to `plugins/`, so the last step is yours: stop the
 server and copy `plugins/data/perfmon/update/Perfmon.wasm` over `plugins/Perfmon.wasm`. With
 `update_download = true` the download happens by itself at startup.
 
 The check at startup runs before the server ticks. `/perf update check` and
-`/perf update download` run while it is ticking, and the server may pause until GitHub answers
-(at most a few seconds if GitHub cannot be reached).
+`/perf update download` run while it is ticking, and the server may pause until the Market answers
+(at most a few seconds if it cannot be reached).
 
 The check needs the `http.outbound` permission. To turn it off, set `update_check = false`, or
 block the permission (see [Permissions](#permissions)). Nothing about your server is sent: the
-request is a plain GET of the public release data.
+requests are plain GETs of public Market data, with the running perfmon version.
 
 ## Memory
 
@@ -97,9 +101,9 @@ spike_warn_cooldown_secs = 10   # at most one warning per this many seconds
 csv_interval_secs = 60          # 0 turns the CSV log off
 csv_count_entities = true       # count entities for each CSV line
 console_colors = true           # coloured output in the server console (false = plain text)
-update_check = true             # ask GitHub for the latest release when the server starts
-update_notify_ops = true        # tell operators in game when a newer release is out
-update_download = false         # download a newer Perfmon.wasm into the data folder at startup
+update_check = true             # ask the Pumpkin Market for the latest version when the server starts
+update_notify_ops = true        # tell operators in game when a newer version is out
+update_download = false         # download a newer, Market-signed Perfmon.wasm into the data folder at startup
 ```
 
 A config file written by an older version keeps working: settings it does not have use the

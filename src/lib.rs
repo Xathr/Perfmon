@@ -3,8 +3,8 @@
 //! It times every server tick through the tick-end event, keeps 15 minutes of history, flags lag
 //! spikes, counts entities per world, reports system and plugin memory, and appends a metrics
 //! line to `plugins/data/perfmon/metrics.csv` on a fixed interval. Everything is reachable with
-//! the `/perf` command (aliases `/tps`, `/lag`). At startup it asks GitHub whether a newer release
-//! is out.
+//! the `/perf` command (aliases `/tps`, `/lag`). At startup it asks the Pumpkin Market whether a newer
+//! version is out.
 
 #![allow(non_snake_case)] // the library is named Perfmon so the plugin file is Perfmon.wasm
 
@@ -22,7 +22,7 @@ mod plugin {
     use crate::config::Config;
     use crate::http;
     use crate::stats::{Bucket, Stats, bar, human_bytes, mspt_colour, tps_colour};
-    use crate::update::{self, Release, Status};
+    use crate::update::{self, Status};
     use pumpkin_plugin_api::command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs};
     use pumpkin_plugin_api::commands::CommandHandler;
     use pumpkin_plugin_api::events::{EventHandler, EventPriority, PlayerJoinEvent, ServerTickEndEvent};
@@ -107,7 +107,7 @@ mod plugin {
             text(" ", "gray"),
             button("Report", "/perf report", "Write everything to a report file"),
             text(" ", "gray"),
-            button("Update", "/perf update", "Whether a newer perfmon release is out"),
+            button("Update", "/perf update", "Whether a newer perfmon version is out"),
             text(" ", "gray"),
             text("[Reset]", "red").suggest("/perf reset").hover("Clear the tick history and spike list\nClick to put /perf reset in the chat box"),
         ]);
@@ -143,64 +143,59 @@ mod plugin {
         }
     }
 
-    /// Asks GitHub for the latest release and compares it with the running version.
+    /// Asks the Pumpkin Market for the latest version and compares it with the running one.
     fn check_update() -> Status {
-        match http::get(update::LATEST_URL, 512 * 1024).and_then(|body| update::parse_release(&body)) {
-            Ok(release) if update::is_newer(&release.tag, VERSION) => Status::Available { release, downloaded: None },
-            Ok(release) => Status::Current { latest: release.tag },
+        match http::get(&update::check_url(VERSION), 64 * 1024).and_then(|body| update::parse_check(&body)) {
+            Ok(latest) if update::is_newer(&latest, VERSION) => Status::Available { latest, downloaded: None },
+            Ok(latest) => Status::Current { latest },
             Err(e) => Status::Failed(e),
         }
     }
 
-    /// Saves the release's Perfmon.wasm in the data folder, after checking it against the SHA-256
-    /// published with the release. A plugin cannot write to plugins/, so the admin copies it over.
-    fn download_update(release: &Release) -> Result<(), String> {
-        let (Some(wasm_url), Some(sha256_url)) = (&release.wasm_url, &release.sha256_url) else {
-            return Err(format!("release {} has no Perfmon.wasm with a checksum", release.tag));
-        };
-        let want = update::parse_sha256_file(&String::from_utf8_lossy(&http::get(sha256_url, 4096)?)).ok_or("unreadable checksum file")?;
+    /// Saves the Market's signed Perfmon.wasm in the data folder, after checking its signature
+    /// against the Market's key. A plugin cannot write to plugins/, so the admin copies it over.
+    fn download_update(latest: &str) -> Result<(), String> {
+        let key = update::parse_public_key(&http::get(update::PUBLIC_KEY_URL, 4096)?)?;
         let dir = format!("{}/update", FOLDER.lock().unwrap());
         let path = format!("{dir}/{}", update::ASSET);
-        if std::fs::read(&path).is_ok_and(|have| update::sha256_hex(&have) == want) {
+        if std::fs::read(&path).is_ok_and(|have| update::verify_download(&have, &key, latest).is_ok()) {
             return Ok(()); // already downloaded
         }
-        let data = http::get(wasm_url, 32 * 1024 * 1024)?;
-        if update::sha256_hex(&data) != want {
-            return Err("the download does not match its published checksum; nothing was saved".into());
-        }
+        let data = http::get(update::DOWNLOAD_URL, 32 * 1024 * 1024)?;
+        update::verify_download(&data, &key, latest).map_err(|e| format!("{e}; nothing was saved"))?;
         std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, data)).map_err(|e| format!("{UPDATE_FILE}: {e}"))
     }
 
     /// Downloads the available update, if there is one, and records where it went.
     fn download_available() -> Result<(), String> {
-        let Status::Available { release, .. } = UPDATE.lock().unwrap().clone() else {
-            return Err("there is no newer release to download".into());
+        let Status::Available { latest, .. } = UPDATE.lock().unwrap().clone() else {
+            return Err("there is no newer version to download".into());
         };
-        download_update(&release)?;
-        *UPDATE.lock().unwrap() = Status::Available { release, downloaded: Some(UPDATE_FILE.into()) };
+        download_update(&latest)?;
+        *UPDATE.lock().unwrap() = Status::Available { latest, downloaded: Some(UPDATE_FILE.into()) };
         Ok(())
     }
 
     /// The update status as chat lines; shown by /perf update and logged at startup.
     fn update_lines(status: &Status) -> Vec<Vec<Part>> {
-        let check = button("Check now", "/perf update check", "Ask GitHub for the latest release.\nThe server may pause for a moment while it answers.");
+        let check = button("Check now", "/perf update check", "Ask the Pumpkin Market for the latest version.\nThe server may pause for a moment while it answers.");
         match status {
             Status::Off => vec![vec![text("Update check is off (update_check = false in config.toml). ", "gray"), check]],
-            Status::Current { latest } => vec![vec![text(format!("perfmon v{VERSION} is up to date (latest release: {latest}). "), "green"), check]],
+            Status::Current { latest } => vec![vec![text(format!("perfmon v{VERSION} is up to date (latest on the Pumpkin Market: v{latest}). "), "green"), check]],
             Status::Failed(why) => vec![vec![text(format!("Update check failed: {why}. "), "red"), check]],
-            Status::Available { release, downloaded } => {
+            Status::Available { latest, downloaded } => {
                 let mut lines = vec![
-                    vec![text(format!("perfmon {} is out", release.tag), "yellow").bold(), text(format!(" (this server runs v{VERSION})."), "gray")],
-                    vec![text("Release notes: ", "gray"), text(release.page_url.clone(), "aqua").open(release.page_url.clone()).hover("Click to open the release page")],
+                    vec![text(format!("perfmon v{latest} is out"), "yellow").bold(), text(format!(" (this server runs v{VERSION})."), "gray")],
+                    vec![text("Pumpkin Market: ", "gray"), text(update::PAGE_URL, "aqua").open(update::PAGE_URL).hover("Click to open perfmon on the Pumpkin Market")],
                 ];
                 lines.push(match downloaded {
                     Some(path) => vec![
-                        text("Downloaded and verified: ", "green"),
+                        text("Downloaded, signed by the Market: ", "green"),
                         text(path.clone(), "white").copy(path.clone()).hover("Click to copy the path"),
                         text(". Stop the server and copy it over plugins/Perfmon.wasm.", "gray"),
                     ],
                     None => vec![
-                        button("Download", "/perf update download", "Save the new Perfmon.wasm in plugins/data/perfmon/update/\nand check it against the release's SHA-256.\nThe server may pause for a moment while it downloads."),
+                        button("Download", "/perf update download", "Save the Market's signed Perfmon.wasm in plugins/data/perfmon/update/\nafter checking its signature.\nThe server may pause for a moment while it downloads."),
                         text(" ", "gray"),
                         check,
                     ],
@@ -214,7 +209,7 @@ mod plugin {
         player.has_permission("perfmon:perf") || matches!(player.get_permission_level(), PermissionLevel::Two | PermissionLevel::Three | PermissionLevel::Four)
     }
 
-    /// Tells operators about a newer release shortly after they join.
+    /// Tells operators about a newer version shortly after they join.
     struct UpdateNotice;
     impl EventHandler<PlayerJoinEvent> for UpdateNotice {
         fn handle(&self, _server: Server, e: <PlayerJoinEvent as pumpkin_plugin_api::FromIntoEvent>::Data) -> <PlayerJoinEvent as pumpkin_plugin_api::FromIntoEvent>::Data {
@@ -222,13 +217,13 @@ mod plugin {
             if available && cfg().update_notify_ops && may_use_perf(&e.player) {
                 let id = e.player.get_id();
                 pumpkin_plugin_api::scheduler::schedule_delayed_task(JOIN_NOTICE_DELAY_TICKS, move |server| {
-                    let Status::Available { release, .. } = UPDATE.lock().unwrap().clone() else { return };
+                    let Status::Available { latest, .. } = UPDATE.lock().unwrap().clone() else { return };
                     let Some(player) = server.get_player_by_uuid(id) else { return };
                     let line = chat::line(&[
                         text("[Perfmon] ", "light_purple"),
-                        text(format!("{} is out", release.tag), "yellow"),
+                        text(format!("v{latest} is out"), "yellow"),
                         text(format!(" (this server runs v{VERSION}). "), "gray"),
-                        text("[Release notes]", "aqua").open(release.page_url.clone()).hover(release.page_url.clone()),
+                        text("[Pumpkin Market]", "aqua").open(update::PAGE_URL).hover(update::PAGE_URL),
                         text(" ", "gray"),
                         button("Details", "/perf update", "Update status and download"),
                     ]);
@@ -381,7 +376,7 @@ mod plugin {
         let _ = writeln!(f, "{},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{},{}", now(), m1.tps, m1.mean_ms, m1.p95_ms, m1.max_ms, m1.over_budget, spikes, server.get_player_count(), ec, mem, plugin_heap_bytes());
     }
 
-    /// Checks for a newer release while the server is still starting, so no tick waits for GitHub.
+    /// Checks for a newer version while the server is still starting, so no tick waits for the Market.
     fn startup_update_check(config: &Config) {
         use pumpkin_plugin_api::logging::LogLevel;
         *UPDATE.lock().unwrap() = check_update();
@@ -529,7 +524,7 @@ mod plugin {
                     say_parts(&sender, &[text("Tick history and spike list cleared. ", "green"), button("Refresh", "/perf", "Show the summary")]);
                 }
                 Action::Help => {
-                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf graph", "tick times as a bar graph"), ("/perf spikes", "recent lag spikes"), ("/perf entities", "entity counts per world and by type"), ("/perf ping", "every player's ping"), ("/perf heap", "memory"), ("/perf report", "write a full report file"), ("/perf update", "check for a newer perfmon release"), ("/perf reset", "clear history")] {
+                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf graph", "tick times as a bar graph"), ("/perf spikes", "recent lag spikes"), ("/perf entities", "entity counts per world and by type"), ("/perf ping", "every player's ping"), ("/perf heap", "memory"), ("/perf report", "write a full report file"), ("/perf update", "check for a newer perfmon version"), ("/perf reset", "clear history")] {
                         let c = text(cmd, "gold");
                         let c = if cmd == "/perf reset" { c.suggest(cmd) } else { c.run(cmd) };
                         say_parts(&sender, &[c.hover(format!("Click for {cmd}")), text(format!(" {what}"), "gray")]);
@@ -555,7 +550,7 @@ mod plugin {
                     permissions::SYS_INFO.into(),      // memory, CPU and OS for /perf heap
                     permissions::FS_READ_DATA.into(),  // config.toml
                     permissions::FS_WRITE_DATA.into(), // config.toml, metrics.csv, reports, downloaded updates
-                    permissions::HTTP_OUTBOUND.into(), // update check against GitHub releases
+                    permissions::HTTP_OUTBOUND.into(), // update check against the Pumpkin Market
                 ],
             }
         }

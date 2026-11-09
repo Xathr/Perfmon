@@ -32,7 +32,7 @@ pub fn get(url: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
 
 fn fetch(url: &Url, max_bytes: usize) -> Result<Reply, String> {
     let headers = Fields::new();
-    for (name, value) in [("user-agent", USER_AGENT), ("accept", "application/vnd.github+json, */*")] {
+    for (name, value) in [("user-agent", USER_AGENT), ("accept", "application/json, application/wasm, */*")] {
         headers.append(name, value.as_bytes()).map_err(|e| format!("header {name}: {e:?}"))?;
     }
     let request = OutgoingRequest::new(headers);
@@ -80,8 +80,8 @@ fn fetch(url: &Url, max_bytes: usize) -> Result<Reply, String> {
         }
     }
     if status != 200 {
-        // GitHub explains API errors (rate limit, not found) in a small JSON body.
-        let why = serde_json::from_slice::<serde_json::Value>(&body).ok().and_then(|v| v["message"].as_str().map(str::to_string));
+        // The Market explains errors in a short line of text, such as "Plugin not found on Pumpkin Market".
+        let why = std::str::from_utf8(&body).ok().map(str::trim).filter(|t| !t.is_empty() && t.len() < 200 && !t.contains('<')).map(str::to_string);
         return Err(match why {
             Some(why) => format!("HTTP {status} from {}: {why}", url.authority),
             None => format!("HTTP {status} from {}", url.authority),
