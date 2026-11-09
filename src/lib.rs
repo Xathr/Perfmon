@@ -548,7 +548,7 @@ mod plugin {
             PluginMetadata {
                 name: "perfmon".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
-                authors: vec!["Mineversed".into()],
+                authors: vec!["Xathr".into()],
                 description: "Tick timing, lag spikes, entity counts and memory, with /perf and a CSV log.".into(),
                 dependencies: vec![],
                 permissions: vec![
