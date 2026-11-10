@@ -43,6 +43,8 @@ only fills in the chat box so it can't be triggered by accident.
 TPS is worked out from tick durations: a tick that takes under 50 ms counts as 50 ms, because the
 server sleeps for the rest. Colours: green is healthy, yellow is close to the limit, red is lagging.
 
+![/perf graph in game](market/screenshot-graph.png)
+
 ## Updates
 
 When the server starts, perfmon asks the [Pumpkin Market](https://market.pumpkinmc.org/plugin/ID0WVaaw)

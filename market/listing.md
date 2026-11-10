@@ -11,7 +11,7 @@ Copy each field into the Store Listing form at market.pumpkinmc.org.
 | Version | 0.3.2 |
 | Binary | `Perfmon.wasm` from the latest release of this repository |
 | Icon | `logo.png` (512×512) |
-| Screenshot | `screenshot-perf.png` (1600×900) |
+| Screenshots | `screenshot-perf.png`, `screenshot-graph.png`, `screenshot-console.png` (1600×900 each) |
 | Source link | https://github.com/Xathr/Perfmon |
 | Keywords | performance, tps, lag, mspt, profiler, monitor, debug, memory, entities, admin |
 | Description | contents of `description.md` |

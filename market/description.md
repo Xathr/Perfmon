@@ -21,6 +21,16 @@
 - 🖥️ **Startup banner** with the spike threshold, CSV log and commands, and every console line tagged `[Perfmon]`, including `/perf` output in the console
 - 🪶 Lightweight: one small event per tick, no extra threads, about 1 MB of memory
 
+![Tick-time graph](https://raw.githubusercontent.com/Xathr/Perfmon/main/market/screenshot-graph.png)
+
+## Setup
+
+1. Put `Perfmon.wasm` in your server's `plugins/` folder and start the server.
+2. Answer `y` when Pumpkin asks to approve the plugin's permissions (or pre-approve them, see below).
+3. Run `/perf` in game or in the console. There is nothing else to set up, on Linux or Windows.
+
+![Console](https://raw.githubusercontent.com/Xathr/Perfmon/main/market/screenshot-console.png)
+
 ## Commands
 
 | Command | What it shows |
@@ -39,7 +49,7 @@
 
 ## Configuration
 
-`plugins/data/perfmon/config.toml` is created on first start:
+`plugins/data/perfmon/config.toml` is created on first start. Every setting is optional:
 
 ```toml
 spike_threshold_ms = 100        # a tick at least this long counts as a lag spike
