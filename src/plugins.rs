@@ -16,7 +16,11 @@
 //!                 "gauges":[{"name":"npcs","value":12}]}   anything else worth showing
 //! ```
 //!
-//! Every field but the first is optional. A plugin can also introduce itself, so the server
+//! Every field but the first is optional. A plugin whose work runs beside the server tick instead
+//! of inside it (a network loop, say) adds `"off_tick":true`: its time is CPU used, not tick time
+//! lost, and perfmon words it that way and never blames it for a slow tick.
+//!
+//! More on the above: A plugin can also introduce itself, so the server
 //! admin doesn't have to list it in perfmon's config: it sends `{"perfmon":1,"hello":"<its
 //! name>"}` to the plugin named `perfmon`.
 //!
@@ -67,6 +71,8 @@ pub struct Report {
     pub work_us: Option<u64>,
     pub calls: Option<u64>,
     pub max_us: Option<u64>,
+    /// The plugin's work runs beside the server tick, not inside it.
+    pub off_tick: bool,
     pub gauges: Vec<Gauge>,
 }
 
@@ -210,6 +216,8 @@ pub struct Watched {
     pub name: String,
     pub state: State,
     pub version: Option<String>,
+    /// Its work runs beside the server tick (see [`Report::off_tick`]).
+    pub off_tick: bool,
     pub gauges: Vec<Gauge>,
     samples: VecDeque<Sample>,
     spikes: VecDeque<PluginSpike>,
@@ -218,7 +226,7 @@ pub struct Watched {
 
 impl Watched {
     pub fn new(name: &str) -> Self {
-        Self { name: name.to_string(), state: State::Unknown, version: None, gauges: Vec::new(), samples: VecDeque::new(), spikes: VecDeque::new(), total_spikes: 0 }
+        Self { name: name.to_string(), state: State::Unknown, version: None, off_tick: false, gauges: Vec::new(), samples: VecDeque::new(), spikes: VecDeque::new(), total_spikes: 0 }
     }
 
     /// Takes in one answer. Returns the spike, if the report carried one past `limits.spike_ms`.
@@ -243,6 +251,7 @@ impl Watched {
         }
         self.state = State::Reporting;
         self.version = report.version;
+        self.off_tick = report.off_tick;
         self.gauges = report.gauges;
         if self.samples.len() == HISTORY {
             self.samples.pop_front();
@@ -336,7 +345,11 @@ impl Watched {
             out.push(Finding {
                 kind: Kind::Lag,
                 severe: ms >= limits.lag_ms * 2.0,
-                text: format!("uses {ms:.1} ms of every tick ({:.0}% of the 50 ms a tick has)", ms * 100.0 / TICK_MS),
+                text: if self.off_tick {
+                    format!("is busy {ms:.1} ms per tick beside the server tick ({:.0}% of one CPU core). This uses CPU; it does not make ticks longer", ms * 100.0 / TICK_MS)
+                } else {
+                    format!("uses {ms:.1} ms of every tick ({:.0}% of the 50 ms a tick has)", ms * 100.0 / TICK_MS)
+                },
             });
         }
         if let Some(growth) = self.memory_growth(LEAK_WINDOW_SECS)
@@ -361,7 +374,11 @@ impl Watched {
             out.push(Finding {
                 kind: Kind::Spike,
                 severe: spike.duration_us >= limits.spike_ms * 2000,
-                text: format!("ran for {ms:.1} ms in one go {}s ago ({:.1}x a whole tick)", now.saturating_sub(spike.unix_secs), ms / TICK_MS),
+                text: if self.off_tick {
+                    format!("was busy for {ms:.1} ms in one go {}s ago, beside the server tick", now.saturating_sub(spike.unix_secs))
+                } else {
+                    format!("ran for {ms:.1} ms in one go {}s ago ({:.1}x a whole tick)", now.saturating_sub(spike.unix_secs), ms / TICK_MS)
+                },
             });
         }
         out
@@ -401,6 +418,8 @@ impl Registry {
     pub fn suspect(&self, unix_secs: u64, within_secs: u64) -> Option<(&str, PluginSpike)> {
         self.plugins
             .iter()
+            // work beside the tick can't have made a tick slow
+            .filter(|p| !p.off_tick)
             .flat_map(|p| p.spikes.iter().map(move |s| (p.name.as_str(), *s)))
             .filter(|(_, s)| s.unix_secs.abs_diff(unix_secs) <= within_secs)
             .max_by_key(|(_, s)| s.duration_us)
@@ -591,6 +610,29 @@ mod tests {
         registry.reset();
         assert_eq!(registry.suspect(100, 2), None);
         assert_eq!(registry.names(), ["a", "b"]);
+    }
+
+    #[test]
+    fn work_beside_the_tick_is_cpu_not_lag() {
+        let limits = Limits::default();
+        let mut registry = Registry::default();
+        registry.add("proxy");
+        registry.add("mob");
+        let busy = |work_us: u64, max_us: u64| Answer::Report(Report { perfmon: 1, work_us: Some(work_us), calls: Some(1), max_us: Some(max_us), off_tick: true, ..Report::default() });
+        let proxy = registry.get_mut("proxy").unwrap();
+        proxy.record(100, busy(0, 0), &limits);
+        proxy.record(110, busy(2_000_000, 90_000), &limits);
+        assert!(proxy.off_tick);
+        let found = proxy.findings(110, &limits);
+        assert_eq!(found.iter().map(|f| f.kind).collect::<Vec<_>>(), [Kind::Lag, Kind::Spike]);
+        assert!(found[0].text.contains("10.0 ms") && found[0].text.contains("20% of one CPU core") && found[0].text.contains("does not make ticks longer"), "{}", found[0].text);
+        assert!(found[1].text.contains("beside the server tick") && !found[1].text.contains("whole tick"), "{}", found[1].text);
+        // a slow tick at that moment is not put down to it, but to a plugin that runs in the tick
+        assert_eq!(registry.suspect(110, 2), None);
+        registry.get_mut("mob").unwrap().record(110, report(MIB, 1, 1, 30_000), &limits);
+        assert_eq!(registry.suspect(110, 2).map(|(name, _)| name), Some("mob"));
+        assert_eq!(parse_report(br#"{"perfmon":1,"off_tick":true}"#).unwrap().off_tick, true);
+        assert!(!parse_report(br#"{"perfmon":1}"#).unwrap().off_tick);
     }
 
     #[test]

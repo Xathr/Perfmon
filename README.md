@@ -129,7 +129,10 @@ Two messages, both JSON, sent with Pumpkin's plugin-to-plugin call (`send_ipc_me
 | `max_us` | The longest single run since your previous report; start it over each time you answer |
 | `gauges` | Up to 16 numbers of your own to show, each with a `name` and optionally a `unit` |
 
-Every field but `perfmon` is optional: leave out what you don't measure. `work_us` and `calls`
+Every field but `perfmon` is optional: leave out what you don't measure. If your work runs
+beside the server tick instead of inside it (a network loop, for instance), add
+`"off_tick":true` and count only the time you are busy, not the time you wait: perfmon then shows
+it as CPU used and never puts a slow tick down to you. `work_us` and `calls`
 only ever go up; if they go down perfmon takes it that the plugin was reloaded and starts over.
 [Cascade's `src/report.rs`](https://github.com/Xathr/Cascade/blob/main/src/report.rs) is a
 complete example in about 70 lines.

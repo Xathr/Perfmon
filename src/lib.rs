@@ -248,7 +248,8 @@ mod plugin {
                         }
                         if let Some(ms) = p.work_ms_per_tick(plugins::LAG_WINDOW_SECS) {
                             let colour = if ms >= limits.lag_ms * 2.0 { "§c" } else if ms >= limits.lag_ms { "§e" } else { "§a" };
-                            line.push_str(&format!("  §7work {colour}{ms:.2} ms/tick §8({:.1}% of a tick)", ms * 2.0));
+                            let share = if p.off_tick { format!("{:.1}% of a CPU core, beside the tick", ms * 2.0) } else { format!("{:.1}% of a tick", ms * 2.0) };
+                            line.push_str(&format!("  §7work {colour}{ms:.2} ms/tick §8({share})"));
                         }
                         if let Some(calls) = p.calls_per_sec(plugins::LAG_WINDOW_SECS) {
                             line.push_str(&format!("  §7runs §f{calls:.0}§7/s"));
