@@ -51,6 +51,39 @@
 
 `/tps` and `/lag` work as aliases. Commands need operator level 2 or the `perfmon:perf` permission.
 
+## For plugin authors: answering perfmon
+
+Pumpkin does not let one plugin measure another, so `/perf plugins` only has numbers for plugins that report them. Adding that to your own plugin takes two small JSON messages.
+
+Two messages, both JSON, sent with Pumpkin's plugin-to-plugin call (`send_ipc_message` and
+`Plugin::handle_ipc_message`):
+
+1. Once the server is ticking, send `{"perfmon":1,"hello":"<your plugin's name>"}` to the plugin
+   named `perfmon`. If the call fails, perfmon isn't loaded (yet): try again in a minute.
+2. When you receive `{"perfmon":1,"ask":"report"}`, answer:
+
+```json
+{"perfmon":1, "name":"myplugin", "version":"1.0.0",
+ "memory_bytes":4194304, "work_us":81234567, "calls":40211, "max_us":1840,
+ "gauges":[{"name":"sessions","value":12}]}
+```
+
+| Field | Meaning |
+|---|---|
+| `memory_bytes` | Your sandbox's memory now: `core::arch::wasm32::memory_size(0) * 65536` |
+| `work_us` | Microseconds your code has run since it loaded. Time every entry point Pumpkin calls: tasks, event handlers, commands |
+| `calls` | How many such runs there have been |
+| `max_us` | The longest single run since your previous report; start it over each time you answer |
+| `gauges` | Up to 16 numbers of your own to show, each with a `name` and optionally a `unit` |
+
+Every field but `perfmon` is optional: leave out what you don't measure. If your work runs
+beside the server tick instead of inside it (a network loop, for instance), add
+`"off_tick":true` and count only the time you are busy, not the time you wait: perfmon then shows
+it as CPU used and never puts a slow tick down to you. `work_us` and `calls`
+only ever go up; if they go down perfmon takes it that the plugin was reloaded and starts over.
+[Cascade's `src/report.rs`](https://github.com/Xathr/Cascade/blob/main/src/report.rs) is a
+complete example in about 70 lines.
+
 ## Configuration
 
 `plugins/data/perfmon/config.toml` is created on first start. Every setting is optional:
