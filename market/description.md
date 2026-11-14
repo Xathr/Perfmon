@@ -12,7 +12,8 @@
 - 📉 **Tick-time graphs** in chat or the console: the last minute and the last 15 minutes, a bar per time span
 - 📶 **Player ping**: everyone's ping, highest first, and the average
 - 🐄 **Entity counts** per dimension, plus the 10 most common mob types, to find farms and mob pile-ups
-- 🧠 **Memory**: machine memory, CPU threads, and the plugin's own footprint
+- 🧠 **Memory**: machine memory and whether it keeps growing, CPU threads, and the plugin's own footprint
+- 🧩 **Plugin watch**: for plugins that report to perfmon, their memory, time per tick and longest runs, with warnings when one lags, spikes or looks like it leaks. Pumpkin does not let a plugin measure another, so plugins opt in (a short how-to for authors is in the README)
 - 📝 **One-command reports**: `/perf report` writes everything, including the last 1,200 tick times, to a text file you can share
 - 📈 **CSV metrics log**: one line a minute in `metrics.csv`, ready to graph in any spreadsheet
 - 🖱️ **Clickable chat**: a button bar under every result, hover explanations on each number, click-to-copy report paths
@@ -39,7 +40,8 @@
 | `/perf graph` | Tick times as bar graphs: last minute and last 15 minutes |
 | `/perf ping` | Every player's ping and the average |
 | `/perf entities` | Entities and players per dimension, top mob types |
-| `/perf heap` | Memory and CPU threads |
+| `/perf heap` | Memory, how it changed over 10 minutes, and CPU threads |
+| `/perf plugins` | Memory, time per tick and long runs of each plugin that reports to perfmon, with warnings for lag, spikes and suspected leaks |
 | `/perf spikes` | The 10 most recent lag spikes |
 | `/perf report` | Writes a full report file |
 | `/perf update` | Whether a newer version is out; `check` asks again, `download` fetches it |

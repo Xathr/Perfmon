@@ -13,6 +13,7 @@ pub mod chat;
 pub mod config;
 #[cfg(target_arch = "wasm32")]
 mod http;
+pub mod plugins;
 pub mod stats;
 pub mod update;
 
@@ -21,6 +22,7 @@ mod plugin {
     use crate::chat::{self, Part, button, text};
     use crate::config::Config;
     use crate::http;
+    use crate::plugins::{self, Answer, Kind, Limits, Registry, State, Watched};
     use crate::stats::{Bucket, Stats, bar, human_bytes, mspt_colour, tps_colour};
     use crate::update::{self, Status};
     use pumpkin_plugin_api::command::{Command, CommandError, CommandNode, CommandSender, ConsumedArgs};
@@ -40,6 +42,12 @@ mod plugin {
     static LAST_WARN: Mutex<u64> = Mutex::new(0);
     static FOLDER: Mutex<String> = Mutex::new(String::new());
     static UPDATE: Mutex<Status> = Mutex::new(Status::Off);
+    /// The plugins perfmon asks for reports.
+    static PLUGINS: Mutex<Option<Registry>> = Mutex::new(None);
+    /// The machine's used memory over time, watched for steady growth like a plugin's.
+    static MACHINE: Mutex<Option<Watched>> = Mutex::new(None);
+    /// Problems already logged, as "plugin kind": each is logged when it starts, not every second.
+    static WARNED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     const VERSION: &str = env!("CARGO_PKG_VERSION");
     /// Where a downloaded update is saved, as the server admin sees it.
@@ -103,6 +111,8 @@ mod plugin {
             button("Ping", "/perf ping", "Every player's ping"),
         ]);
         say_parts(sender, &[
+            button("Plugins", "/perf plugins", "Memory, tick time and long runs of the plugins that report to perfmon"),
+            text(" ", "gray"),
             button("Memory", "/perf heap", "Machine memory and CPU threads"),
             text(" ", "gray"),
             button("Report", "/perf report", "Write everything to a report file"),
@@ -112,6 +122,173 @@ mod plugin {
             text("[Reset]", "red").suggest("/perf reset").hover("Clear the tick history and spike list\nClick to put /perf reset in the chat box"),
         ]);
     }
+    fn with_plugins<T>(f: impl FnOnce(&mut Registry) -> T) -> T {
+        f(PLUGINS.lock().unwrap().get_or_insert_with(Registry::default))
+    }
+    fn limits() -> Limits {
+        let c = cfg();
+        Limits { lag_ms: c.plugin_lag_ms.max(0.1), spike_ms: c.plugin_spike_ms.max(1), leak_bytes: c.plugin_leak_mb.max(1) * 1024 * 1024 }
+    }
+    /// Steady growth of the whole machine's memory is only worth a word when it is large.
+    fn machine_limits() -> Limits {
+        Limits { leak_bytes: 256 * 1024 * 1024, ..limits() }
+    }
+
+    /// Asks one plugin for its report.
+    fn ask(name: &str) -> Answer {
+        match pumpkin_plugin_api::ipc::send_ipc_message(name, &plugins::request()) {
+            Err(()) => Answer::NotLoaded,
+            Ok(Err(_)) => Answer::Silent,
+            Ok(Ok(bytes)) => plugins::parse_report(&bytes).map_or(Answer::Silent, Answer::Report),
+        }
+    }
+
+    /// Logs a problem when it starts and forgets it when it is over, so the console hears of
+    /// each once.
+    fn warn_once(key: String, active: bool, message: impl FnOnce() -> String) {
+        let mut warned = WARNED.lock().unwrap();
+        let known = warned.iter().position(|k| *k == key);
+        match (active, known) {
+            (true, None) => {
+                warned.push(key);
+                drop(warned);
+                if cfg().warn_on_plugin_problem {
+                    log(pumpkin_plugin_api::logging::LogLevel::Warn, &message());
+                }
+            }
+            (false, Some(at)) => {
+                warned.remove(at);
+            }
+            _ => {}
+        }
+    }
+
+    /// Runs every `plugin_poll_secs`: collects every watched plugin's report and the machine's
+    /// memory, and logs what is new.
+    fn poll_plugins(server: &Server) {
+        let t = now();
+        let limits = limits();
+        let colours = cfg().console_colors;
+        let paint = |code: &str, text: &str| if colours { format!("\x1b[{code}m{text}\x1b[0m") } else { text.to_string() };
+        for name in with_plugins(|r| r.names()) {
+            // asked outside the lock: the plugin may answer by talking to perfmon
+            let answer = ask(&name);
+            let (spike, findings) = with_plugins(|r| {
+                let Some(plugin) = r.get_mut(&name) else { return (None, Vec::new()) };
+                let spike = plugin.record(t, answer, &limits);
+                (spike, plugin.findings(t, &limits))
+            });
+            if let Some(spike) = spike
+                && cfg().warn_on_plugin_problem
+            {
+                let mut last = LAST_WARN.lock().unwrap();
+                if t >= *last + cfg().spike_warn_cooldown_secs {
+                    *last = t;
+                    log(
+                        pumpkin_plugin_api::logging::LogLevel::Warn,
+                        &format!("{} {} ran for {} in one go. Run {} for more.", paint("93", "plugin spike:"), paint("97", &name), paint("91", &format!("{:.1} ms", spike.duration_us as f64 / 1000.0)), paint("96", "/perf plugins")),
+                    );
+                }
+            }
+            for kind in [Kind::Lag, Kind::Leak] {
+                let finding = findings.iter().find(|f| f.kind == kind);
+                warn_once(format!("{name} {kind:?}"), finding.is_some(), || {
+                    let what = if kind == Kind::Lag { "plugin lag:" } else { "plugin memory:" };
+                    format!("{} {} {}. Run {} for more.", paint("93", what), paint("97", &name), finding.map(|f| f.text.clone()).unwrap_or_default(), paint("96", "/perf plugins"))
+                });
+            }
+        }
+        if let Some(used) = server.get_sys_info().used_memory {
+            let leak = {
+                let mut machine = MACHINE.lock().unwrap();
+                let machine = machine.get_or_insert_with(|| Watched::new("machine"));
+                machine.record(t, Answer::Report(plugins::Report { perfmon: plugins::PROTOCOL, memory_bytes: Some(used), ..plugins::Report::default() }), &machine_limits());
+                machine.findings(t, &machine_limits()).into_iter().find(|f| f.kind == Kind::Leak)
+            };
+            warn_once("machine Leak".into(), leak.is_some(), || format!("{} the machine's {}. Run {} for more.", paint("93", "memory:"), leak.map(|f| f.text).unwrap_or_default(), paint("96", "/perf heap")));
+        }
+    }
+
+    /// One line per problem, for the summary and the report: "cascade: uses 6.0 ms of every tick ...".
+    fn problem_lines() -> Vec<(bool, String)> {
+        let t = now();
+        let mut out: Vec<(bool, String)> = with_plugins(|r| r.all().iter().flat_map(|p| p.findings(t, &limits()).into_iter().map(|f| (f.severe, format!("{}: {}", p.name, f.text))).collect::<Vec<_>>()).collect());
+        if let Some(machine) = MACHINE.lock().unwrap().as_ref() {
+            out.extend(machine.findings(t, &machine_limits()).into_iter().filter(|f| f.kind == Kind::Leak).map(|f| (f.severe, format!("machine: {}", f.text))));
+        }
+        out
+    }
+
+    /// `/perf plugins` as chat lines (§ colour codes).
+    fn plugin_lines() -> Vec<String> {
+        let t = now();
+        let limits = limits();
+        let mut out = vec!["§6§l== Plugins ==".to_string()];
+        if cfg().plugin_poll_secs == 0 {
+            out.push("§7Plugin watching is off (plugin_poll_secs = 0 in config.toml).".into());
+            return out;
+        }
+        let lines = with_plugins(|r| {
+            let mut lines = Vec::new();
+            for p in r.all() {
+                match p.state {
+                    State::Unknown => lines.push(format!("§f{} §8not asked yet", p.name)),
+                    State::NotLoaded => lines.push(format!("§f{} §8is not loaded", p.name)),
+                    State::Silent => lines.push(format!("§f{} §7is loaded, but gives perfmon no report", p.name)),
+                    State::Reporting => {
+                        let mut line = format!("§f{}", p.name);
+                        if let Some(version) = &p.version {
+                            line.push_str(&format!(" §8v{version}"));
+                        }
+                        if let Some(memory) = p.memory_bytes() {
+                            line.push_str(&format!("  §7memory §f{}", human_bytes(memory)));
+                            if let Some(growth) = p.memory_growth(plugins::LEAK_WINDOW_SECS).filter(|g| g.bytes() > 0 && g.secs >= 60) {
+                                line.push_str(&format!(" §8(+{} in {} min)", human_bytes(growth.bytes()), growth.secs / 60));
+                            }
+                        }
+                        if let Some(ms) = p.work_ms_per_tick(plugins::LAG_WINDOW_SECS) {
+                            let colour = if ms >= limits.lag_ms * 2.0 { "§c" } else if ms >= limits.lag_ms { "§e" } else { "§a" };
+                            line.push_str(&format!("  §7work {colour}{ms:.2} ms/tick §8({:.1}% of a tick)", ms * 2.0));
+                        }
+                        if let Some(calls) = p.calls_per_sec(plugins::LAG_WINDOW_SECS) {
+                            line.push_str(&format!("  §7runs §f{calls:.0}§7/s"));
+                        }
+                        lines.push(line);
+                        if !p.gauges.is_empty() {
+                            let gauges: Vec<String> = p.gauges.iter().map(|g| format!("§7{} §f{}{}", g.name, trim_number(g.value), g.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default())).collect();
+                            lines.push(format!("  {}", gauges.join("§8 · ")));
+                        }
+                        for finding in p.findings(t, &limits) {
+                            lines.push(format!("  {}⚠ {}", if finding.severe { "§c" } else { "§e" }, finding.text));
+                        }
+                        let spikes = p.recent_spikes(3);
+                        if !spikes.is_empty() {
+                            let list: Vec<String> = spikes.iter().map(|s| format!("{:.1} ms {}s ago", s.duration_us as f64 / 1000.0, t.saturating_sub(s.unix_secs))).collect();
+                            lines.push(format!("  §8long runs ({} in all): {}", p.total_spikes, list.join(", ")));
+                        }
+                    }
+                }
+            }
+            lines
+        });
+        if lines.is_empty() {
+            out.push("§7No plugin is being watched yet.".into());
+            out.push("§8Pumpkin does not let one plugin measure another, so a plugin shows up here when it".into());
+            out.push("§8reports to perfmon (see the README). To look for one by name, list it under".into());
+            out.push("§8plugins = [...] in plugins/data/perfmon/config.toml.".into());
+        } else {
+            out.extend(lines);
+            out.push(format!("§8Limits: {} ms of a tick, runs of {} ms, {} MiB of steady growth in 10 min.", cfg().plugin_lag_ms, cfg().plugin_spike_ms, cfg().plugin_leak_mb));
+        }
+        out
+    }
+
+    /// 12 → "12", 1.50 → "1.5".
+    fn trim_number(value: f64) -> String {
+        let text = format!("{value:.2}");
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+
     /// Linear memory of this plugin's own sandbox (its "heap").
     fn plugin_heap_bytes() -> u64 {
         core::arch::wasm32::memory_size(0) as u64 * 65_536
@@ -296,6 +473,15 @@ mod plugin {
             out.push(format!("§7CPU threads: §f{cpus}"));
         }
         out.push(format!("§7perfmon sandbox heap: §f{}", human_bytes(plugin_heap_bytes())));
+        if let Some(machine) = MACHINE.lock().unwrap().as_ref() {
+            if let Some(growth) = machine.memory_growth(plugins::LEAK_WINDOW_SECS).filter(|g| g.secs >= 60) {
+                let change = growth.to_bytes as i64 - growth.from_bytes as i64;
+                out.push(format!("§7System memory over the last {} min: §f{}{}", growth.secs / 60, if change < 0 { "-" } else { "+" }, human_bytes(change.unsigned_abs())));
+            }
+            for finding in machine.findings(now(), &machine_limits()).into_iter().filter(|f| f.kind == Kind::Leak) {
+                out.push(format!("{}⚠ The machine's {}", if finding.severe { "§c" } else { "§e" }, finding.text));
+            }
+        }
         out
     }
 
@@ -350,7 +536,15 @@ mod plugin {
         for (ty, n) in ec.by_type.iter().take(25) { text.push_str(&format!("  {ty}: {n}\n")); }
         text.push_str("\nRecent lag spikes (newest first):\n");
         for s in with_stats(|s| s.recent_spikes(64)) {
-            text.push_str(&format!("  unix {} tick {}: {:.1} ms\n", s.unix_secs, s.tick, s.duration_us as f64 / 1000.0));
+            let suspect = with_plugins(|r| r.suspect(s.unix_secs, 2).map(|(name, run)| format!(" ({name} ran for {:.1} ms then)", run.duration_us as f64 / 1000.0))).unwrap_or_default();
+            text.push_str(&format!("  unix {} tick {}: {:.1} ms{suspect}\n", s.unix_secs, s.tick, s.duration_us as f64 / 1000.0));
+        }
+        text.push('\n');
+        for l in plugin_lines() { text.push_str(&strip(&l)); text.push('\n'); }
+        let problems = problem_lines();
+        if !problems.is_empty() {
+            text.push_str("\nProblems right now:\n");
+            for (_, problem) in problems { text.push_str(&format!("  {problem}\n")); }
         }
         let info = server.get_sys_info();
         text.push_str(&format!("\nperfmon {VERSION}, Pumpkin {} on {} {}\n", info.pumpkin_version, info.os_name.unwrap_or_default(), info.os_version.unwrap_or_default()));
@@ -402,7 +596,7 @@ mod plugin {
     }
 
     #[derive(Clone, Copy)]
-    enum Action { Summary, Graph, Ping, Entities, Heap, Spikes, Report, Reset, Update, UpdateCheck, UpdateDownload, Help }
+    enum Action { Summary, Graph, Ping, Entities, Heap, Plugins, Spikes, Report, Reset, Update, UpdateCheck, UpdateDownload, Help }
     struct Perf(Action);
     impl CommandHandler for Perf {
         fn handle(&self, sender: CommandSender, server: Server, _args: ConsumedArgs) -> Result<i32, CommandError> {
@@ -435,6 +629,9 @@ mod plugin {
                     if let Some(l) = lines.get(4) { say_parts(&sender, &[text(strip_codes(l), "gray").run("/perf spikes").hover("Click to list recent lag spikes")]); }
                     if let Some(l) = lines.get(5) { say(&sender, l); }
                     for l in memory_lines(&server) { say(&sender, &l); }
+                    for (severe, problem) in problem_lines() {
+                        say_parts(&sender, &[text(format!("⚠ {problem}"), if severe { "red" } else { "yellow" }).run("/perf plugins").hover("Click for every watched plugin")]);
+                    }
                     nav(&sender);
                 }
                 Action::Graph => {
@@ -496,6 +693,10 @@ mod plugin {
                     say(&sender, "§8System memory is the whole machine's; Pumpkin does not expose its own heap to plugins.");
                     nav(&sender);
                 }
+                Action::Plugins => {
+                    for l in plugin_lines() { say(&sender, &l); }
+                    nav(&sender);
+                }
                 Action::Spikes => {
                     let list = with_stats(|s| s.recent_spikes(10));
                     say(&sender, &format!("§6§l== Lag spikes (threshold {} ms) ==", cfg().spike_threshold_ms));
@@ -508,6 +709,11 @@ mod plugin {
                             text(s.tick.to_string(), "white").copy(s.tick.to_string()).hover(format!("Tick {}\nUnix time {}\nClick to copy the tick number", s.tick, s.unix_secs)),
                             text(" took ", "gray"),
                             text(format!("{ms:.1} ms"), chat::mspt_color(ms)).hover(format!("{:.1}x the 50 ms tick budget", ms / 50.0)),
+                            // a plugin that reported a long run in the same couple of seconds
+                            match with_plugins(|r| r.suspect(s.unix_secs, 2).map(|(name, run)| (name.to_string(), run.duration_us))) {
+                                Some((name, us)) => text(format!("  {name} ran for {:.1} ms then", us as f64 / 1000.0), "yellow").run("/perf plugins").hover("A watched plugin reported a long run of its own code\nwithin two seconds of this tick.\nClick for every watched plugin"),
+                                None => text("", "gray"),
+                            },
                         ]);
                     }
                     nav(&sender);
@@ -521,10 +727,12 @@ mod plugin {
                 },
                 Action::Reset => {
                     with_stats(Stats::reset);
+                    with_plugins(Registry::reset);
+                    WARNED.lock().unwrap().clear();
                     say_parts(&sender, &[text("Tick history and spike list cleared. ", "green"), button("Refresh", "/perf", "Show the summary")]);
                 }
                 Action::Help => {
-                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf graph", "tick times as a bar graph"), ("/perf spikes", "recent lag spikes"), ("/perf entities", "entity counts per world and by type"), ("/perf ping", "every player's ping"), ("/perf heap", "memory"), ("/perf report", "write a full report file"), ("/perf update", "check for a newer perfmon version"), ("/perf reset", "clear history")] {
+                    for (cmd, what) in [("/perf", "summary: TPS, MSPT percentiles, players, memory"), ("/perf graph", "tick times as a bar graph"), ("/perf spikes", "recent lag spikes"), ("/perf entities", "entity counts per world and by type"), ("/perf ping", "every player's ping"), ("/perf heap", "memory"), ("/perf plugins", "memory, tick time and long runs of plugins that report to perfmon"), ("/perf report", "write a full report file"), ("/perf update", "check for a newer perfmon version"), ("/perf reset", "clear history")] {
                         let c = text(cmd, "gold");
                         let c = if cmd == "/perf reset" { c.suggest(cmd) } else { c.run(cmd) };
                         say_parts(&sender, &[c.hover(format!("Click for {cmd}")), text(format!(" {what}"), "gray")]);
@@ -555,6 +763,13 @@ mod plugin {
             }
         }
 
+        /// A plugin introducing itself: it is watched from now on.
+        fn handle_ipc_message(&self, _sender: String, message: Vec<u8>) -> Result<Vec<u8>, String> {
+            let name = plugins::parse_hello(&message).ok_or("perfmon only takes {\"perfmon\":1,\"hello\":\"<plugin name>\"}")?;
+            with_plugins(|r| r.add(&name));
+            Ok(plugins::welcome())
+        }
+
         fn on_load(&self, context: Context) -> pumpkin_plugin_api::Result<()> {
             let folder = context.get_data_folder();
             let config = Config::load_or_create(&format!("{folder}/config.toml")).map_err(|e| format!("perfmon: {e}"))?;
@@ -578,11 +793,24 @@ mod plugin {
                     .then(CommandNode::literal("download").execute(Perf(Action::UpdateDownload)))
                     .execute(Perf(Action::Update)),
             );
-            for (name, action) in [("graph", Action::Graph), ("ping", Action::Ping), ("entities", Action::Entities), ("heap", Action::Heap), ("memory", Action::Heap), ("spikes", Action::Spikes), ("report", Action::Report), ("reset", Action::Reset), ("help", Action::Help)] {
+            for (name, action) in [("graph", Action::Graph), ("ping", Action::Ping), ("entities", Action::Entities), ("heap", Action::Heap), ("memory", Action::Heap), ("plugins", Action::Plugins), ("spikes", Action::Spikes), ("report", Action::Report), ("reset", Action::Reset), ("help", Action::Help)] {
                 cmd = cmd.then(CommandNode::literal(name).execute(Perf(action)));
             }
             context.register_command(cmd.execute(Perf(Action::Summary)), "perf");
 
+            {
+                let mut registry = Registry::default();
+                for name in &config.plugins {
+                    if !registry.add(name) {
+                        log(pumpkin_plugin_api::logging::LogLevel::Warn, &format!("plugins in config.toml: \"{name}\" is not a plugin name perfmon can watch"));
+                    }
+                }
+                *PLUGINS.lock().unwrap() = Some(registry);
+            }
+            if config.plugin_poll_secs > 0 {
+                let period = config.plugin_poll_secs * 20;
+                context.schedule_repeating_task(period, period, |server| poll_plugins(&server));
+            }
             if config.csv_interval_secs > 0 {
                 let period = config.csv_interval_secs * 20;
                 context.schedule_repeating_task(period, period, |server| append_csv(&server));

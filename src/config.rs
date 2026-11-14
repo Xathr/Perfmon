@@ -23,11 +23,24 @@ pub struct Config {
     pub update_notify_ops: bool,
     /// Download a newer, Market-signed Perfmon.wasm into the data folder at startup, ready to be copied into plugins/.
     pub update_download: bool,
+    /// Plugins to ask for a report, by name. Plugins that introduce themselves to perfmon are
+    /// watched without being listed.
+    pub plugins: Vec<String>,
+    /// Ask watched plugins for their report this often. 0 turns plugin watching off.
+    pub plugin_poll_secs: u64,
+    /// Speak up when a plugin uses at least this many milliseconds of every tick, on average over a minute.
+    pub plugin_lag_ms: f64,
+    /// A single run of a plugin's code this long counts as a plugin spike.
+    pub plugin_spike_ms: u64,
+    /// Speak up when a plugin's memory has grown steadily by at least this many MiB over ten minutes.
+    pub plugin_leak_mb: u64,
+    /// Log a warning to the console when a plugin lags, spikes or looks like it leaks.
+    pub warn_on_plugin_problem: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { spike_threshold_ms: 100, warn_on_spike: true, spike_warn_cooldown_secs: 10, csv_interval_secs: 60, csv_count_entities: true, console_colors: true, update_check: true, update_notify_ops: true, update_download: false }
+        Self { spike_threshold_ms: 100, warn_on_spike: true, spike_warn_cooldown_secs: 10, csv_interval_secs: 60, csv_count_entities: true, console_colors: true, update_check: true, update_notify_ops: true, update_download: false, plugins: Vec::new(), plugin_poll_secs: 1, plugin_lag_ms: 5.0, plugin_spike_ms: 25, plugin_leak_mb: 8, warn_on_plugin_problem: true }
     }
 }
 
@@ -60,5 +73,10 @@ mod tests {
         assert_eq!(partial.csv_interval_secs, 60);
         // A config written by an older version has no update settings: the defaults apply.
         assert!(partial.update_check && partial.update_notify_ops && !partial.update_download);
+        // ... and no plugin settings either
+        assert!(partial.plugins.is_empty() && partial.plugin_poll_secs == 1 && partial.warn_on_plugin_problem);
+        assert_eq!((partial.plugin_lag_ms, partial.plugin_spike_ms, partial.plugin_leak_mb), (5.0, 25, 8));
+        let listed: super::Config = toml::from_str("plugins = [\"cascade\", \"multiversion\"]\nplugin_poll_secs = 0").unwrap();
+        assert_eq!((listed.plugins.len(), listed.plugin_poll_secs), (2, 0));
     }
 }
