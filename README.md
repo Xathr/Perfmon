@@ -78,6 +78,8 @@ requests are plain GETs of public Market data, with the running perfmon version.
 
 `/perf plugins` shows what other plugins cost:
 
+![/perf plugins in game](market/screenshot-plugins.png)
+
 ```
 cascade v0.1.0  memory 1.3 MiB (+0.2 MiB in 10 min)  work 0.21 ms/tick (0.4% of a tick)  runs 20/s
   npcs 3 · displays 4 · shown 7

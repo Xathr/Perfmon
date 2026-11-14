@@ -24,6 +24,8 @@
 
 ![Tick-time graph](https://raw.githubusercontent.com/Xathr/Perfmon/main/market/screenshot-graph.png)
 
+![Plugin watch](https://raw.githubusercontent.com/Xathr/Perfmon/main/market/screenshot-plugins.png)
+
 ## Setup
 
 1. Put `Perfmon.wasm` in your server's `plugins/` folder and start the server.
@@ -63,6 +65,12 @@ console_colors = true           # coloured console output
 update_check = true             # ask the Pumpkin Market for the latest version at startup
 update_notify_ops = true        # tell operators in game when a newer version is out
 update_download = false         # download a newer, signed Perfmon.wasm into the data folder at startup
+plugins = []                    # plugins to ask for a report, by name; ones that introduce themselves need no entry
+plugin_poll_secs = 1            # how often watched plugins are asked; 0 turns plugin watching off
+plugin_lag_ms = 5.0             # warn when a plugin uses this much of every tick, averaged over a minute
+plugin_spike_ms = 25            # one run of a plugin's code this long is a plugin spike
+plugin_leak_mb = 8              # warn when a plugin's memory grew steadily by this much in 10 minutes
+warn_on_plugin_problem = true   # log plugin lag, spikes and suspected leaks to the console
 ```
 
 ## Permissions it asks for
