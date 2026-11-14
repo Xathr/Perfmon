@@ -81,8 +81,8 @@ requests are plain GETs of public Market data, with the running perfmon version.
 ![/perf plugins in game](market/screenshot-plugins.png)
 
 ```
-cascade v0.1.0  memory 1.3 MiB (+0.2 MiB in 10 min)  work 0.21 ms/tick (0.4% of a tick)  runs 20/s
-  npcs 3 · displays 4 · shown 7
+regions v1.4.2  memory 1.3 MiB (+0.2 MiB in 10 min)  work 0.21 ms/tick (0.4% of a tick)  runs 20/s
+  regions 48 · flags 112
   ⚠ ran for 61.0 ms in one go 12s ago (1.2x a whole tick)
 multiversion is loaded, but gives perfmon no report
 ```
@@ -136,8 +136,8 @@ beside the server tick instead of inside it (a network loop, for instance), add
 `"off_tick":true` and count only the time you are busy, not the time you wait: perfmon then shows
 it as CPU used and never puts a slow tick down to you. `work_us` and `calls`
 only ever go up; if they go down perfmon takes it that the plugin was reloaded and starts over.
-[Cascade's `src/report.rs`](https://github.com/Xathr/Cascade/blob/main/src/report.rs) is a
-complete example in about 70 lines.
+[Multiversion's `src/report.rs`](https://github.com/Xathr/Multiversion/blob/main/src/report.rs) is
+a complete example.
 
 ## Memory
 

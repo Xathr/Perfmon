@@ -8,12 +8,12 @@
 //!
 //! ```text
 //! perfmon asks   {"perfmon":1,"ask":"report"}
-//! plugin answers {"perfmon":1,"name":"cascade","version":"0.1.0",
+//! plugin answers {"perfmon":1,"name":"regions","version":"0.1.0",
 //!                 "memory_bytes":4194304,       its sandbox memory, right now
 //!                 "work_us":81234567,           time spent in its own code since it loaded
 //!                 "calls":40211,                how many times its code ran
 //!                 "max_us":1840,                its longest single run since the last report
-//!                 "gauges":[{"name":"npcs","value":12}]}   anything else worth showing
+//!                 "gauges":[{"name":"regions","value":12}]}   anything else worth showing
 //! ```
 //!
 //! Every field but the first is optional. A plugin whose work runs beside the server tick instead
@@ -447,12 +447,12 @@ mod tests {
     #[test]
     fn the_question_and_a_full_answer() {
         assert_eq!(request(), br#"{"perfmon":1,"ask":"report"}"#);
-        let answer = br#"{"perfmon":1,"name":"cascade","version":"0.1.0","memory_bytes":4194304,"work_us":81234567,"calls":40211,"max_us":1840,
-            "gauges":[{"name":"npcs","value":12},{"name":"sent","value":1.5,"unit":"MB"}],"something_new":true}"#;
+        let answer = br#"{"perfmon":1,"name":"regions","version":"0.1.0","memory_bytes":4194304,"work_us":81234567,"calls":40211,"max_us":1840,
+            "gauges":[{"name":"regions","value":12},{"name":"sent","value":1.5,"unit":"MB"}],"something_new":true}"#;
         let r = parse_report(answer).unwrap();
-        assert_eq!((r.name.as_deref(), r.version.as_deref()), (Some("cascade"), Some("0.1.0")));
+        assert_eq!((r.name.as_deref(), r.version.as_deref()), (Some("regions"), Some("0.1.0")));
         assert_eq!((r.memory_bytes, r.work_us, r.calls, r.max_us), (Some(4_194_304), Some(81_234_567), Some(40_211), Some(1840)));
-        assert_eq!(r.gauges, [Gauge { name: "npcs".into(), value: 12.0, unit: None }, Gauge { name: "sent".into(), value: 1.5, unit: Some("MB".into()) }]);
+        assert_eq!(r.gauges, [Gauge { name: "regions".into(), value: 12.0, unit: None }, Gauge { name: "sent".into(), value: 1.5, unit: Some("MB".into()) }]);
         // the least a plugin can say
         assert_eq!(parse_report(br#"{"perfmon":1}"#).unwrap(), Report { perfmon: 1, ..Report::default() });
     }
@@ -481,8 +481,8 @@ mod tests {
 
     #[test]
     fn introductions_name_a_plugin() {
-        assert_eq!(parse_hello(br#"{"perfmon":1,"hello":"cascade"}"#), Some("cascade".into()));
-        for bad in [&br#"{"perfmon":1,"hello":"Not A Name"}"#[..], br#"{"perfmon":2,"hello":"cascade"}"#, br#"{"perfmon":1,"ask":"report"}"#, br#"{"perfmon":1,"hello":""}"#, b"hello"] {
+        assert_eq!(parse_hello(br#"{"perfmon":1,"hello":"regions"}"#), Some("regions".into()));
+        for bad in [&br#"{"perfmon":1,"hello":"Not A Name"}"#[..], br#"{"perfmon":2,"hello":"regions"}"#, br#"{"perfmon":1,"ask":"report"}"#, br#"{"perfmon":1,"hello":""}"#, b"hello"] {
             assert_eq!(parse_hello(bad), None, "{}", String::from_utf8_lossy(bad));
         }
         assert!(valid_name("multi-version_2") && !valid_name("a b") && !valid_name("") && !valid_name(&"a".repeat(65)));
@@ -492,11 +492,11 @@ mod tests {
     #[test]
     fn the_registry_keeps_one_of_each_name() {
         let mut registry = Registry::default();
-        assert!(registry.add("cascade") && registry.add("multiversion"));
-        assert!(!registry.add("cascade"), "already watched");
+        assert!(registry.add("regions") && registry.add("multiversion"));
+        assert!(!registry.add("regions"), "already watched");
         assert!(!registry.add("perfmon"), "perfmon doesn't watch itself");
         assert!(!registry.add("Bad Name"));
-        assert_eq!(registry.names(), ["cascade", "multiversion"]);
+        assert_eq!(registry.names(), ["regions", "multiversion"]);
         for i in 0..100 {
             registry.add(&format!("p{i}"));
         }

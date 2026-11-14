@@ -76,7 +76,7 @@ mod tests {
         // ... and no plugin settings either
         assert!(partial.plugins.is_empty() && partial.plugin_poll_secs == 1 && partial.warn_on_plugin_problem);
         assert_eq!((partial.plugin_lag_ms, partial.plugin_spike_ms, partial.plugin_leak_mb), (5.0, 25, 8));
-        let listed: super::Config = toml::from_str("plugins = [\"cascade\", \"multiversion\"]\nplugin_poll_secs = 0").unwrap();
+        let listed: super::Config = toml::from_str("plugins = [\"regions\", \"multiversion\"]\nplugin_poll_secs = 0").unwrap();
         assert_eq!((listed.plugins.len(), listed.plugin_poll_secs), (2, 0));
     }
 }

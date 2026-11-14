@@ -209,7 +209,7 @@ mod plugin {
         }
     }
 
-    /// One line per problem, for the summary and the report: "cascade: uses 6.0 ms of every tick ...".
+    /// One line per problem, for the summary and the report: "regions: uses 6.0 ms of every tick ...".
     fn problem_lines() -> Vec<(bool, String)> {
         let t = now();
         let mut out: Vec<(bool, String)> = with_plugins(|r| r.all().iter().flat_map(|p| p.findings(t, &limits()).into_iter().map(|f| (f.severe, format!("{}: {}", p.name, f.text))).collect::<Vec<_>>()).collect());

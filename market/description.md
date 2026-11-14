@@ -81,8 +81,8 @@ beside the server tick instead of inside it (a network loop, for instance), add
 `"off_tick":true` and count only the time you are busy, not the time you wait: perfmon then shows
 it as CPU used and never puts a slow tick down to you. `work_us` and `calls`
 only ever go up; if they go down perfmon takes it that the plugin was reloaded and starts over.
-[Cascade's `src/report.rs`](https://github.com/Xathr/Cascade/blob/main/src/report.rs) is a
-complete example in about 70 lines.
+[Multiversion's `src/report.rs`](https://github.com/Xathr/Multiversion/blob/main/src/report.rs) is
+a complete example.
 
 ## Configuration
 
