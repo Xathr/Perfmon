@@ -40,6 +40,9 @@ pub const SPIKES_KEPT: usize = 32;
 pub const MAX_WATCHED: usize = 64;
 /// One server tick at full speed, in milliseconds.
 const TICK_MS: f64 = 50.0;
+/// A plugin that works beside the tick is only reported as busy from this many ms per tick: half
+/// of one CPU core. Less than that costs the server nothing it would notice.
+pub const OFF_TICK_BUSY_MS: f64 = 25.0;
 const TICKS_PER_SECOND: f64 = 20.0;
 
 /// The question perfmon sends.
@@ -257,6 +260,10 @@ impl Watched {
             self.samples.pop_front();
         }
         self.samples.push_back(Sample { unix_secs: now, memory_bytes: report.memory_bytes, work_us: report.work_us, calls: report.calls });
+        // A long run beside the tick delays no tick, so it is not a spike worth a warning.
+        if self.off_tick {
+            return None;
+        }
         let duration_us = report.max_us.filter(|us| *us >= limits.spike_ms * 1000)?;
         let spike = PluginSpike { unix_secs: now, duration_us };
         if self.spikes.len() == SPIKES_KEPT {
@@ -339,12 +346,14 @@ impl Watched {
         if self.state != State::Reporting {
             return out;
         }
+        // Work beside the tick only matters once it takes a real share of a CPU core.
+        let lag_limit = if self.off_tick { limits.lag_ms.max(OFF_TICK_BUSY_MS) } else { limits.lag_ms };
         if let Some(ms) = self.work_ms_per_tick(LAG_WINDOW_SECS)
-            && ms >= limits.lag_ms
+            && ms >= lag_limit
         {
             out.push(Finding {
                 kind: Kind::Lag,
-                severe: ms >= limits.lag_ms * 2.0,
+                severe: ms >= lag_limit * 2.0,
                 text: if self.off_tick {
                     format!("is busy {ms:.1} ms per tick beside the server tick ({:.0}% of one CPU core). This uses CPU; it does not make ticks longer", ms * 100.0 / TICK_MS)
                 } else {
@@ -623,10 +632,14 @@ mod tests {
         proxy.record(100, busy(0, 0), &limits);
         proxy.record(110, busy(2_000_000, 90_000), &limits);
         assert!(proxy.off_tick);
-        let found = proxy.findings(110, &limits);
-        assert_eq!(found.iter().map(|f| f.kind).collect::<Vec<_>>(), [Kind::Lag, Kind::Spike]);
-        assert!(found[0].text.contains("10.0 ms") && found[0].text.contains("20% of one CPU core") && found[0].text.contains("does not make ticks longer"), "{}", found[0].text);
-        assert!(found[1].text.contains("beside the server tick") && !found[1].text.contains("whole tick"), "{}", found[1].text);
+        // 10 ms per tick beside the tick (a fifth of a core) and one long run: nothing to report
+        assert_eq!(proxy.findings(110, &limits).len(), 0);
+        assert_eq!(proxy.total_spikes, 0);
+        // most of a core is worth a word, as CPU used
+        proxy.record(120, busy(14_000_000, 90_000), &limits);
+        let found = proxy.findings(120, &limits);
+        assert_eq!(found.iter().map(|f| f.kind).collect::<Vec<_>>(), [Kind::Lag]);
+        assert!(found[0].text.contains("35.0 ms") && found[0].text.contains("70% of one CPU core") && found[0].text.contains("does not make ticks longer"), "{}", found[0].text);
         // a slow tick at that moment is not put down to it, but to a plugin that runs in the tick
         assert_eq!(registry.suspect(110, 2), None);
         registry.get_mut("mob").unwrap().record(110, report(MIB, 1, 1, 30_000), &limits);

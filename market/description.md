@@ -79,7 +79,8 @@ Two messages, both JSON, sent with Pumpkin's plugin-to-plugin call (`send_ipc_me
 Every field but `perfmon` is optional: leave out what you don't measure. If your work runs
 beside the server tick instead of inside it (a network loop, for instance), add
 `"off_tick":true` and count only the time you are busy, not the time you wait: perfmon then shows
-it as CPU used and never puts a slow tick down to you. `work_us` and `calls`
+it as CPU used and never puts a slow tick down to you. Such a plugin is not warned about for
+long runs, and only for CPU once it is busy for half a core or more. `work_us` and `calls`
 only ever go up; if they go down perfmon takes it that the plugin was reloaded and starts over.
 [Multiversion's `src/report.rs`](https://github.com/Xathr/Multiversion/blob/main/src/report.rs) is
 a complete example.
